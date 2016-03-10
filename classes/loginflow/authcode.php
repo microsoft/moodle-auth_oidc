@@ -326,6 +326,15 @@ class authcode extends \auth_oidc\loginflow\base {
         } else {
             // Use 'upn' if available for username (Azure-specific), or fall back to lower-case oidcuniqid.
             $username = $idtoken->claim('upn');
+            
+            /**moodle only allows email like characters in username field (Which UPN maps to). Have encountered # signs in UPN.
+            need to replace with a moodle acceptable character, if they are found
+            */
+            $badchar=#;
+            if (strstr($username,$badchar) {
+              $username = str_replace($badchar, "_", $username);                
+            }
+            
             if (empty($username)) {
                 $username = $oidcuniqid;
             }
