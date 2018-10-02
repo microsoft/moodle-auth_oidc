@@ -139,3 +139,5 @@ $string['ucp_disconnect_title'] = '{$a} Disconnection';
 $string['ucp_disconnect_details'] = 'This will disconnect your Moodle account from {$a}. You\'ll need to create a username and password to log in to Moodle.';
 $string['ucp_title'] = '{$a} Management';
 $string['ucp_o365accountconnected'] = 'This Office 365 account is already connected with another Moodle account.';
+$string['userdataitem-token'] = 'OpenID Connect access token';
+$string['userdataitem-prevlogin'] = 'OpenID Connect previous login method';
