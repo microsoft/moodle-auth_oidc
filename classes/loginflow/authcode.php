@@ -418,13 +418,20 @@ class authcode extends \auth_oidc\loginflow\base {
             // Already connected user.
 
             if (empty($tokenrec->userid)) {
-                // ERROR.
-                echo 'ERROR1';die();
-            }
-            $user = $DB->get_record('user', ['id' => $tokenrec->userid]);
-            if (empty($user)) {
-                // ERROR.
-                echo 'ERROR2';die();
+                // Existing token record, but missing the user ID.
+                $user = $DB->get_record('user', ['username' => $tokenrec->username]);
+                if (empty($user)) {
+                    throw new \moodle_exception('errorauthloginfailednouser', 'auth_oidc', null, null, '3');
+                }
+                $tokenrec->userid = $user->id;
+                $DB->update_record('auth_oidc_token', $tokenrec);
+
+            } else {
+                // Existing token with a user ID.
+                $user = $DB->get_record('user', ['id' => $tokenrec->userid]);
+                if (empty($user)) {
+                    throw new \moodle_exception('errorauthloginfailednouser', 'auth_oidc', null, null, '4');
+                }
             }
             $username = $user->username;
             $this->updatetoken($tokenrec->id, $authparams, $tokenparams);
