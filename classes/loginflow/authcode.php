@@ -107,6 +107,8 @@ class authcode extends \auth_oidc\loginflow\base {
             $this->handleauthresponse($requestparams);
         } else {
             if (isloggedin() && !isguestuser() && empty($justauth) && empty($promptaconsent)) {
+                global $USER;
+                if($USER->id )
                 if (isset($SESSION->wantsurl) and (strpos($SESSION->wantsurl, $CFG->wwwroot) === 0)) {
                     $urltogo = $SESSION->wantsurl;
                     unset($SESSION->wantsurl);
@@ -115,6 +117,10 @@ class authcode extends \auth_oidc\loginflow\base {
                 }
                 redirect($urltogo);
                 die();
+            }
+            //Handle Guest account session termination
+            if(isguestuser()){
+                require_logout();
             }
             // Initial login request.
             $stateparams = ['forceflow' => 'authcode'];
