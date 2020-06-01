@@ -55,12 +55,14 @@ class auth_oidc_oidcclient_testcase extends \advanced_testcase {
         $secret = 'secret';
         $redirecturi = 'redirecturi';
         $resource = 'resource';
-        $client->setcreds($id, $secret, $redirecturi, $resource);
+        $scope = 'scope';
+        $client->setcreds($id, $secret, $redirecturi, $resource, $scope);
 
         $this->assertEquals($id, $client->get_clientid());
         $this->assertEquals($secret, $client->get_clientsecret());
         $this->assertEquals($redirecturi, $client->get_redirecturi());
         $this->assertEquals($resource, $client->get_resource());
+        $this->assertEquals($scope, $client->get_scope());
     }
 
     /**
