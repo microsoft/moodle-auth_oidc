@@ -89,7 +89,7 @@ class base {
      * @return mixed array with no magic quotes or false on error
      */
     public function get_userinfo($username) {
-        global $DB;
+        global$CFG, $DB;
 
         $tokenrec = $DB->get_record('auth_oidc_token', ['username' => $username]);
         if (empty($tokenrec)) {
@@ -99,7 +99,7 @@ class base {
         $idtoken = \auth_oidc\jwt::instance_from_encoded($tokenrec->idtoken);
 
         $userinfo = [
-            'lang' => 'en',
+            'lang' => $CFG->lang, 
             'idnumber' => $username,
         ];
 
