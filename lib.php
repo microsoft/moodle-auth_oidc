@@ -105,6 +105,17 @@ function auth_oidc_after_config() {
             // We have the oidc=1 param set. Disable guest access (in memory -
             // not saved in database) to force the login with oidc for this request.
             unset($CFG->autologinguests);
+
+            // Set the return URL.
+            if ($url = qualified_me()) {
+                $wantsurl = new moodle_url($url);
+                $wantsurl->remove_params('oidc');
+                $SESSION->wantsurl = $wantsurl->out(false);
+            }
+
+            // Force the redirect to login.
+            redirect(new \moodle_url('/auth/oidc/'));
+            die;
         }
     } catch (\Exception $exception) {
         // @codingStandardsIgnoreStart
