@@ -68,21 +68,7 @@ class oidcclient {
         $this->clientid = $id;
         $this->clientsecret = $secret;
         $this->redirecturi = $redirecturi;
-        if (!empty($tokenresource)) {
-            $this->tokenresource = $tokenresource;
-        } else {
-            $o365installed = $DB->get_record('config_plugins', ['plugin' => 'local_o365', 'name' => 'version']);
-            if (!empty($o365installed)) {
-                if (\local_o365\rest\o365api::use_chinese_api() === true) {
-                    $this->tokenresource = 'https://microsoftgraph.chinacloudapi.cn';
-                } else {
-                    $this->tokenresource = 'https://graph.microsoft.com';
-                }
-            } else {
-                $this->tokenresource = 'https://graph.microsoft.com';
-            }
-
-        }
+        $this->tokenresource = (!empty($tokenresource)) ? $tokenresource : null;
         $this->scope = (!empty($scope)) ? $scope : 'openid profile email';
     }
 
@@ -165,10 +151,12 @@ class oidcclient {
             'scope' =>  $this->scope,
             'nonce' => $nonce,
             'response_mode' => 'form_post',
-            'resource' => $this->tokenresource,
             'state' => $this->getnewstate($nonce, $stateparams),
             'redirect_uri' => $this->redirecturi
         ];
+        if (!is_null($this->tokenresource)) {
+            $params['resource'] = $this->tokenresource;
+        }
         if ($promptlogin === true) {
             $params['prompt'] = 'login';
         }
