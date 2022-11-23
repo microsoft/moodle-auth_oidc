@@ -79,6 +79,10 @@ if ($hassiteconfig) {
     $settings->add(new auth_oidc_admin_setting_loginflow('auth_oidc/loginflow',
         get_string('cfg_loginflow_key', 'auth_oidc'), '', 'authcode'));
 
+    // Response type
+    $settings->add(new admin_setting_configtext('auth_oidc/response_type',
+        get_string('cfg_response_type_key', 'auth_oidc'), '', 'code'));
+
     // User restrictions heading.
     $settings->add(new admin_setting_heading('auth_oidc/user_restrictions_heading',
         get_string('heading_user_restrictions', 'auth_oidc'), get_string('heading_user_restrictions_desc', 'auth_oidc')));

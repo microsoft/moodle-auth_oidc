@@ -173,7 +173,7 @@ class oidcclient {
         $nonce = 'N'.uniqid();
 
         $params = [
-            'response_type' => 'code',
+            'response_type' => get_config('auth_oidc', 'response_type'),
             'client_id' => $this->clientid,
             'scope' => $this->scope,
             'nonce' => $nonce,
