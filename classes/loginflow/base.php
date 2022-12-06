@@ -254,7 +254,7 @@ class base {
                 if (!isset($userdata['email'])) {
                     $email = $token->claim('email');
                     if (!empty($email)) {
-                        $userdata['mail'] = $email;
+                        $userdata['mail'] = is_array($email) ? $email[0] : $email;
                     } else {
                         if (!empty($upn)) {
                             $aademailvalidateresult = filter_var($upn, FILTER_VALIDATE_EMAIL);
