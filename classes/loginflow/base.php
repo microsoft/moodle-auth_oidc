@@ -138,7 +138,7 @@ class base {
                     // If local_o365 is installed, but all field mapping fields are in token, then use token.
                     $fieldmappingfromtoken = false;
                     // Process both ID token and access tokens.
-                    $tokenames = ['idtoken', 'token'];
+                    $tokenames = ['idtoken'];
 
                     foreach ($tokenames as $tokename) {
                         $token = jwt::instance_from_encoded($tokenrec->$tokename);
@@ -208,7 +208,7 @@ class base {
             $userdata = [];
 
             // Process both ID token and access tokens.
-            $tokenames = ['idtoken', 'token'];
+            $tokenames = ['idtoken'];
 
             foreach ($tokenames as $tokename) {
                 $token = jwt::instance_from_encoded($tokenrec->$tokename);
