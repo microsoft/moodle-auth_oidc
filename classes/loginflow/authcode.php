@@ -584,10 +584,13 @@ class authcode extends base {
                     $username = $idtoken->claim('email');
                 }
             } else {
-                $username = $idtoken->claim('upn');
-                if (empty($username)) {
+                // Bright Alley Adjustment, user "email" when available
+                // as username instead of UPN or random username
+                $email = $idtoken->claim('email');
+                if (empty($email)) {
                     $username = $idtoken->claim('unique_name');
                 }
+                $username = is_array($email) ? $email[0] : $email;
             }
             $originalupn = null;
 
