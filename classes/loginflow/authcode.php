@@ -607,8 +607,8 @@ class authcode extends base {
                 // Handle username change - update token, update connection.
                 if ($usernamechanged) {
                     $potentialduplicateuser = core_user::get_user_by_username($oidcusername);
-                    if ($potentialduplicateuser) {
-                        // Username already exists, cannot change Moodle account username, throw exception.
+                    if ($potentialduplicateuser->id!=$tokenrec->userid) {
+                        // Username already exists in another user, cannot change Moodle account username, throw exception.
                         throw new moodle_exception('erroruserwithusernamealreadyexists', 'auth_oidc', null, null, '2');
                     } else {
                         // Username does not exist:
