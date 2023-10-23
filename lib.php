@@ -177,7 +177,7 @@ function auth_oidc_get_tokens_with_mismatched_usernames() {
               FROM {auth_oidc_token} tok
               JOIN {user} u ON u.id = tok.userid
              WHERE tok.userid != 0
-               AND u.username != tok.username';
+               AND u.username COLLATE utf8mb4_general_ci != tok.username COLLATE utf8mb4_general_ci';
     $records = $DB->get_recordset_sql($sql);
     foreach ($records as $record) {
         $item = new stdClass();
