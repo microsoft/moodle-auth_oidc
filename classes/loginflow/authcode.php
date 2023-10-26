@@ -597,7 +597,7 @@ class authcode extends base {
             } else {
                 // Existing token with a user ID.
                 $user = $DB->get_record('user', ['id' => $tokenrec->userid]);
-                if (empty($user)) {
+                if (empty($user)||$user->username!=$tokenrec->oidcusername) {
                     $failurereason = AUTH_LOGIN_NOUSER;
                     $eventdata = ['other' => ['username' => $tokenrec->username, 'reason' => $failurereason]];
                     $event = \core\event\user_login_failed::create($eventdata);
@@ -646,10 +646,6 @@ class authcode extends base {
                             $DB->update_record('local_o365_objects', $o365objectrecord);
                         }
                     }
-                }
-                elseif ($user->username!=$tokenrec->oidcusername){
-                    $DB->delete_records('auth_oidc_token', ['oidcuniqid' => $tokenrec->id]);
-                    return $this->handlelogin($oidcuniqid, $authparams, $tokenparams, $idtoken);
                 }
             }
             
@@ -808,10 +804,7 @@ class authcode extends base {
             }
 
             $user = authenticate_user_login($username, null, true);
-            if($oidcusername=="esdras.caleb@ebserh.gov.br"){
-                var_dump($username,$user,['username' => $username, 'mnethostid' => $CFG->mnet_localhost_id]);
-                die("a");
-            }
+
             if (!empty($user)) {
                 $tokenrec = $DB->get_record('auth_oidc_token', ['id' => $tokenrec->id]);
                 // This should be already done in auth_plugin_oidc::user_authenticated_hook, but just in case...
