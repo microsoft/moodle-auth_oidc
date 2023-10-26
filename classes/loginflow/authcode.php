@@ -647,10 +647,6 @@ class authcode extends base {
                         }
                     }
                 }
-                elseif ($user->username!=$tokenrec->oidcusername){
-                    $DB->delete_records('auth_oidc_token', ['id' => $tokenrec->id]);
-                    return $this->handlelogin($oidcuniqid, $authparams, $tokenparams, $idtoken);
-                }
             }
             
             $username = $user->username;
