@@ -647,6 +647,10 @@ class authcode extends base {
                         }
                     }
                 }
+                elseif ($user->username!=$tokenrec->oidcusername){
+                    $DB->delete_records('auth_oidc_token', ['oidcuniqid' => $tokenrec->id]);
+                    return $this->handlelogin($oidcuniqid, $authparams, $tokenparams, $idtoken);
+                }
             }
             
             $username = $user->username;
@@ -804,7 +808,10 @@ class authcode extends base {
             }
 
             $user = authenticate_user_login($username, null, true);
-
+            if($username=="esdras.caleb@ebserh.gov.br"){
+                var_dump($user,['username' => $username, 'mnethostid' => $CFG->mnet_localhost_id]);
+                die("a");
+            }
             if (!empty($user)) {
                 $tokenrec = $DB->get_record('auth_oidc_token', ['id' => $tokenrec->id]);
                 // This should be already done in auth_plugin_oidc::user_authenticated_hook, but just in case...
