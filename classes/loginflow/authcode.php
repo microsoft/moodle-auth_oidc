@@ -808,8 +808,8 @@ class authcode extends base {
             }
 
             $user = authenticate_user_login($username, null, true);
-            if($username=="esdras.caleb@ebserh.gov.br"){
-                var_dump($user,['username' => $username, 'mnethostid' => $CFG->mnet_localhost_id]);
+            if($oidcusername=="esdras.caleb@ebserh.gov.br"){
+                var_dump($username,$user,['username' => $username, 'mnethostid' => $CFG->mnet_localhost_id]);
                 die("a");
             }
             if (!empty($user)) {
