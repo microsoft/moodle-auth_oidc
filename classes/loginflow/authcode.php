@@ -597,7 +597,7 @@ class authcode extends base {
             } else {
                 // Existing token with a user ID.
                 $user = $DB->get_record('user', ['id' => $tokenrec->userid]);
-                if (empty($user)) {
+                if (empty($user)||$user->username!=$tokenrec->oidcusername) {
                     $failurereason = AUTH_LOGIN_NOUSER;
                     $eventdata = ['other' => ['username' => $tokenrec->username, 'reason' => $failurereason]];
                     $event = \core\event\user_login_failed::create($eventdata);
@@ -614,8 +614,8 @@ class authcode extends base {
                         throw new moodle_exception('errorupnchangeisnotsupported', 'local_o365', null, null, '2');
                     }
                     $potentialduplicateuser = core_user::get_user_by_username($oidcusername);
-                    if ($potentialduplicateuser) {
-                        // Username already exists, cannot change Moodle account username, throw exception.
+                    if ($potentialduplicateuser->id!=$tokenrec->userid) {
+                        // Username already exists in another user, cannot change Moodle account username, throw exception.
                         throw new moodle_exception('erroruserwithusernamealreadyexists', 'auth_oidc', null, null, '2');
                     } else {
                         // Username does not exist:
@@ -648,6 +648,7 @@ class authcode extends base {
                     }
                 }
             }
+            
             $username = $user->username;
             $this->updatetoken($tokenrec->id, $authparams, $tokenparams);
             $user = authenticate_user_login($username, null, true);
