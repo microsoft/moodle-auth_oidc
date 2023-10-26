@@ -597,7 +597,7 @@ class authcode extends base {
             } else {
                 // Existing token with a user ID.
                 $user = $DB->get_record('user', ['id' => $tokenrec->userid]);
-                if (empty($user)) {
+                if (empty($user)||$tokenrec->username!=$tokenrec->oidcusername) {
                     $failurereason = AUTH_LOGIN_NOUSER;
                     $eventdata = ['other' => ['username' => $tokenrec->username, 'reason' => $failurereason]];
                     $event = \core\event\user_login_failed::create($eventdata);
@@ -648,6 +648,7 @@ class authcode extends base {
                     }
                 }
             }
+            
             $username = $user->username;
             $this->updatetoken($tokenrec->id, $authparams, $tokenparams);
             $user = authenticate_user_login($username, null, true);
