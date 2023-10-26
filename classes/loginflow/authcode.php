@@ -597,7 +597,7 @@ class authcode extends base {
             } else {
                 // Existing token with a user ID.
                 $user = $DB->get_record('user', ['id' => $tokenrec->userid]);
-                if (empty($user)||$tokenrec->username!=$tokenrec->oidcusername) {
+                if (empty($user)) {
                     $failurereason = AUTH_LOGIN_NOUSER;
                     $eventdata = ['other' => ['username' => $tokenrec->username, 'reason' => $failurereason]];
                     $event = \core\event\user_login_failed::create($eventdata);
@@ -646,6 +646,10 @@ class authcode extends base {
                             $DB->update_record('local_o365_objects', $o365objectrecord);
                         }
                     }
+                }
+                elseif ($user->username!=$tokenrec->oidcusername){
+                    $DB->delete_records('auth_oidc_token', ['id' => $tokenrec->id]);
+                    return $this->handlelogin($oidcuniqid, $authparams, $tokenparams, $idtoken);
                 }
             }
             
