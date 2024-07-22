@@ -73,8 +73,8 @@ function auth_oidc_initialize_customicon($filefullname) {
         }
     }
 
-    if (file_exists($CFG->dataroot . '/pix_plugins/auth/oidc/0')) {
-        $file->copy_content_to($CFG->dataroot . '/pix_plugins/auth/oidc/0/customicon.jpg');
+    if (file_exists(sprintf('%s/pix_plugins/auth/oidc/0',$CFG->dataroot))) {
+        $file->copy_content_to(sprintf('%s/pix_plugins/auth/oidc/0/customicon.jpg',$CFG->dataroot));
         theme_reset_all_caches();
     }
 }
@@ -132,7 +132,7 @@ function auth_oidc_is_local_365_installed() {
 
     $dbmanager = $DB->get_manager();
 
-    return file_exists($CFG->dirroot . '/local/o365/version.php') &&
+    return file_exists(sprintf('%s/local/o365/version.php',$CFG->dirroot)) &&
         $DB->record_exists('config_plugins', ['plugin' => 'local_o365', 'name' => 'version']) &&
         $dbmanager->table_exists('local_o365_objects') &&
         $dbmanager->table_exists('local_o365_connections');
@@ -178,12 +178,10 @@ function auth_oidc_get_tokens_with_mismatched_usernames() {
 
     $mismatchedtokens = [];
 
-    $sql = 'SELECT tok.id AS id, tok.userid AS tokenuserid, tok.username AS tokenusername, tok.oidcusername AS oidcusername,
-                   tok.oidcuniqid as oidcuniqid, u.id AS muserid, u.username AS musername
+    $sql = 'SELECT tok.id AS id, tok.userid AS tokenuserid, tok.username AS tokenusername, tok.oidcusername AS oidcusername, tok.oidcuniqid as oidcuniqid, u.id AS muserid, u.username AS musername
               FROM {auth_oidc_token} tok
               JOIN {user} u ON u.id = tok.userid
-             WHERE tok.userid != 0
-               AND u.username != tok.username';
+              WHERE tok.userid != 0 AND u.username != tok.username';
     $records = $DB->get_recordset_sql($sql);
     foreach ($records as $record) {
         $item = new stdClass();
@@ -337,19 +335,19 @@ function auth_oidc_get_field_mappings() {
     $authoidcconfig = get_config('auth_oidc');
 
     foreach ($userfields as $userfield) {
-        $fieldmapsettingname = 'field_map_' . $userfield;
+        $fieldmapsettingname = sprintf('field_map_%s',$userfield);
         if (property_exists($authoidcconfig, $fieldmapsettingname) && $authoidcconfig->$fieldmapsettingname) {
             $fieldsetting = [];
             $fieldsetting['field_map'] = $authoidcconfig->$fieldmapsettingname;
 
-            $fieldlocksettingname = 'field_lock_' . $userfield;
+            $fieldlocksettingname = sprintf('field_lock_%s', $userfield);
             if (property_exists($authoidcconfig, $fieldlocksettingname)) {
                 $fieldsetting['field_lock'] = $authoidcconfig->$fieldlocksettingname;
             } else {
                 $fieldsetting['field_lock'] = 'unlocked';
             }
 
-            $fieldupdatelocksettignname = 'field_updatelocal_' . $userfield;
+            $fieldupdatelocksettignname = sprintf('field_updatelocal_%s', $userfield);
             if (property_exists($authoidcconfig, $fieldupdatelocksettignname)) {
                 $fieldsetting['update_local'] = $authoidcconfig->$fieldupdatelocksettignname;
             } else {
@@ -479,7 +477,7 @@ function auth_oidc_display_auth_lock_options($settings, $auth, $userfields, $hel
             // Display a message that the field can not be mapped because it's too long.
             $url = new moodle_url('/user/profile/index.php');
             $a = (object)['fieldname' => s($fieldname), 'shortname' => s($field), 'charlimit' => 67, 'link' => $url->out()];
-            $settings->add(new admin_setting_heading($auth.'/field_not_mapped_'.sha1($field), '',
+            $settings->add(new admin_setting_heading(sprintf('%s/field_not_mapped_%s',$auth,sha1($field)), '',
                 get_string('cannotmapfield', 'auth', $a)));
         } else if ($mapremotefields) {
             // We are mapping to a remote field here.
