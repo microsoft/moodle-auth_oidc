@@ -286,6 +286,44 @@ function auth_oidc_delete_token(int $tokenid): void {
 }
 
 /**
+ * Process and add custom claims to remote fields array with validation.
+ *
+ * @param array $remotefields Existing remote fields array
+ * @return array Updated remote fields array with validated custom claims
+ */
+function auth_oidc_process_custom_claims($remotefields) {
+    $customclaimsconfig = get_config('auth_oidc', 'customclaims');
+    if (empty($customclaimsconfig)) {
+        return $remotefields;
+    }
+
+    // Split by space, trim, remove empty values, and remove duplicates.
+    $customclaimsarray = array_filter(array_map('trim', explode(' ', $customclaimsconfig)));
+    $customclaimsarray = array_unique($customclaimsarray);
+
+    // Get all existing field names as reserved to prevent overriding.
+    $reserved = array_keys($remotefields);
+
+    foreach ($customclaimsarray as $value) {
+        // Validate claim name format (alphanumeric, underscore, hyphen only).
+        if (!preg_match('/^[a-zA-Z0-9_-]+$/', $value)) {
+            debugging("Invalid custom claim name skipped: $value", DEBUG_DEVELOPER);
+            continue;
+        }
+
+        // Prevent overriding existing fields.
+        if (in_array($value, $reserved, true)) {
+            debugging("Reserved custom claim name skipped: $value", DEBUG_DEVELOPER);
+            continue;
+        }
+
+        $remotefields[$value] = $value;
+    }
+
+    return $remotefields;
+}
+
+/**
  * Return the list of remote field options in field mapping.
  *
  * @return array
@@ -366,6 +404,9 @@ function auth_oidc_get_remote_fields() {
                 'auth_oidc'
             );
         }
+
+        // Add custom claims if configured, with validation.
+        $remotefields = auth_oidc_process_custom_claims($remotefields);
     } else {
         $remotefields = [
             '' => get_string('settings_fieldmap_feild_not_mapped', 'auth_oidc'),
@@ -376,6 +417,9 @@ function auth_oidc_get_remote_fields() {
             'surname' => get_string('settings_fieldmap_field_surname', 'auth_oidc'),
             'mail' => get_string('settings_fieldmap_field_mail', 'auth_oidc'),
         ];
+
+        // Add custom claims if configured, with validation.
+        $remotefields = auth_oidc_process_custom_claims($remotefields);
     }
 
     return $remotefields;
@@ -848,4 +892,31 @@ function auth_oidc_is_user_sync_enabled() {
     }
 
     return false;
+}
+
+/**
+ * Mask a secret value by showing only the first 2 characters followed by asterisks.
+ * Similar to how Azure Portal masks secrets.
+ *
+ * @param string $secret The secret value to mask
+ * @return string The masked value (e.g., "Ab**********")
+ */
+function auth_oidc_mask_secret($secret) {
+    if (empty($secret) || strlen($secret) < 2) {
+        return '**********';
+    }
+    return substr($secret, 0, 2) . '**********';
+}
+
+/**
+ * Check if a value appears to be a masked secret.
+ *
+ * @param string $value The value to check
+ * @return bool True if the value is masked, false otherwise
+ */
+function auth_oidc_is_masked_secret($value) {
+    // Check if value matches pattern: exactly 10 asterisks, or 2 chars followed by 10 asterisks.
+    // This matches both cases: secrets shorter than 2 chars (masked as **********)
+    // and secrets 2+ chars (masked as XX**********).
+    return preg_match('/^(.{2})?\*{10}$/', $value) === 1;
 }

@@ -99,11 +99,16 @@ $string['clientcertfile'] = 'File name of client certificate public key';
 $string['clientcertfile_help'] = 'When using <b>certificate</b> authentication method and <b>File name</b> certificate source, this is the file name of public key, or certificate, used to authenticate with IdP. The file needs to present in a folder <b>microsoft_certs</b> in the Moodle data folder.';
 $string['clientcertpassphrase'] = 'Client certificate passphrase';
 $string['clientcertpassphrase_help'] = 'If the client certificate private key is encrypted, this is the passphrase to decrypt it.';
+$string['change_client_secret'] = 'Change client secret';
+$string['change_client_secret_desc'] = 'Check this box to update the client secret. For security, existing secrets are masked and only the first 2 characters are shown.';
+$string['change_cert_passphrase'] = 'Change certificate passphrase';
+$string['change_cert_passphrase_desc'] = 'Check this box to update the certificate passphrase. For security, existing passphrases are masked and only the first 2 characters are shown.';
 $string['cfg_domainhint_key'] = 'Domain Hint';
 $string['cfg_domainhint_desc'] = 'When using the <b>Authorization Code</b> login flow, pass this value as the "domain_hint" parameter. "domain_hint" is used by some OpenID Connect IdP to make the login process easier for users. Check with your provider to see whether they support this parameter.';
 $string['cfg_err_invalidauthendpoint'] = 'Invalid Authorization Endpoint';
 $string['cfg_err_invalidtokenendpoint'] = 'Invalid Token Endpoint';
 $string['cfg_err_invalidclientid'] = 'Invalid client ID';
+$string['error_masked_secret_not_changed'] = 'Please enter a new value. The masked value cannot be saved.';
 $string['cfg_err_invalidclientsecret'] = 'Invalid client secret';
 $string['cfg_forceredirect_key'] = 'Force redirect';
 $string['cfg_forceredirect_desc'] = 'If enabled, will skip the login index page and redirect to the OpenID Connect page. Can be bypassed with ?noredirect=1 URL param';
@@ -154,6 +159,15 @@ $string['oidcresource_help'] = 'The OpenID Connect resource for which to send th
 <b>Note</b> this is paramater is not supported in <b>Microsoft identity platform (v2.0)</b> IdP type.';
 $string['oidcscope'] = 'Scope';
 $string['oidcscope_help'] = 'The OIDC Scope to use.';
+$string['customclaims'] = 'Custom claims';
+$string['customclaims_help'] = 'Space-separated list of custom claim names from your identity provider\'s tokens.<br/>
+<b>Important:</b>
+<ul>
+<li>Claims must exist in your IdP\'s token configuration (e.g., Keycloak protocol mappers, Azure AD optional/custom claims)</li>
+<li>If a claim doesn\'t exist in the token, field mapping will silently skip it - no error will be shown</li>
+<li>Claim names are case-sensitive and can only contain alphanumeric characters, hyphens, and underscores</li>
+<li>Examples: <code>employee_type department costCenter custom_role</code></li>
+</ul>';
 $string['secretexpiryrecipients'] = 'Secret Expiry Notification Recipients';
 $string['secretexpiryrecipients_help'] = 'A comma-separated list of email addresses to send secret expiry notifications to.<br/>
 If no email address is entered, the main site administrator will be notified.';
@@ -269,6 +283,7 @@ $string['error_endpoint_mismatch_token_endpoint'] = 'The configured token endpoi
 </ul>';
 $string['error_tenant_specific_endpoint_required'] = 'When using "Microsoft identity platform (v2.0)" IdP type and "Certificate" authentication method, tenant specific endpoint (i.e. not common/organizations/consumers) is required.';
 $string['error_empty_oidcresource'] = 'Resource cannot be empty when using Microsoft Entra ID (v1.0) or other types of IdP.';
+$string['error_invalid_custom_claim'] = 'Invalid custom claim name. Custom claims can only contain alphanumeric characters, hyphens, and underscores.';
 $string['erroruserwithusernamealreadyexists'] = 'Error occurred when trying to rename your Moodle account. A Moodle user with the new username already exists. Ask your site administrator to resolve this first.';
 $string['error_no_response_available'] = 'No responses available.';
 
