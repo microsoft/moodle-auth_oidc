@@ -23,6 +23,9 @@
  * @copyright (C) 2014 onwards Microsoft, Inc. (http://microsoft.com/)
  */
 
+use core\context\system;
+use core\url;
+
 require_once(__DIR__ . '/../../config.php');
 require_once(__DIR__ . '/auth.php');
 require_once(__DIR__ . '/lib.php');
@@ -59,8 +62,7 @@ if (!empty($action)) {
     }
 } else {
     $PAGE->set_url('/auth/oidc/ucp.php');
-    $usercontext = \context_user::instance($USER->id);
-    $PAGE->set_context(\context_system::instance());
+    $PAGE->set_context(system::instance());
     $PAGE->set_pagelayout('standard');
     $USER->editing = false;
     $authconfig = get_config('auth_oidc');
@@ -88,7 +90,7 @@ if (!empty($action)) {
         echo \html_writer::tag('h4', get_string('ucp_status_enabled', 'auth_oidc'), ['class' => 'notifysuccess']);
         if (is_enabled_auth('manual') === true) {
             if (auth_oidc_connectioncapability($USER->id, 'disconnect')) {
-                $connectlinkuri = new \moodle_url('/auth/oidc/ucp.php', ['action' => 'disconnectlogin']);
+                $connectlinkuri = new url('/auth/oidc/ucp.php', ['action' => 'disconnectlogin']);
                 $strdisconnect = get_string('ucp_login_stop', 'auth_oidc', $opname);
                 $linkhtml = \html_writer::link($connectlinkuri, $strdisconnect);
                 echo \html_writer::tag('h5', $linkhtml);
@@ -98,7 +100,7 @@ if (!empty($action)) {
     } else {
         echo \html_writer::tag('h4', get_string('ucp_status_disabled', 'auth_oidc'), ['class' => 'notifyproblem']);
         if (auth_oidc_connectioncapability($USER->id, 'connect')) {
-            $connectlinkuri = new \moodle_url('/auth/oidc/ucp.php', ['action' => 'connectlogin']);
+            $connectlinkuri = new url('/auth/oidc/ucp.php', ['action' => 'connectlogin']);
             $linkhtml = \html_writer::link($connectlinkuri, get_string('ucp_login_start', 'auth_oidc', $opname));
             echo \html_writer::tag('h5', $linkhtml);
             echo \html_writer::span(get_string('ucp_login_start_desc', 'auth_oidc', $opname));

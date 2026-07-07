@@ -35,7 +35,7 @@ use core\output\notification;
 use core_text;
 use core_user;
 use moodle_exception;
-use moodle_url;
+use core\url;
 use pix_icon;
 use stdClass;
 
@@ -58,34 +58,69 @@ class authcode extends base {
         if (!auth_oidc_is_setup_complete()) {
             return [];
         }
-
-        if (!empty($this->config->customicon)) {
-            $icon = new pix_icon('0/customicon', get_string('pluginname', 'auth_oidc'), 'auth_oidc');
-        } else {
-            $icon = (!empty($this->config->icon)) ? $this->config->icon : 'auth_oidc:o365';
-            $icon = explode(':', $icon);
-            if (isset($icon[1])) {
-                [$iconcomponent, $iconkey] = $icon;
+        $showicon = isset($this->config->set_pix) ? $this->config->set_pix : true;
+        $idpentry = [
+            'url' => new url('/auth/oidc/', ['source' => 'loginpage']),
+            'name' => strip_tags(format_text($this->config->opname)),
+        ];
+        if ($showicon) {
+            if (!empty($this->config->customicon)) {
+                $iconvalue = new pix_icon('0/customicon', get_string('pluginname', 'auth_oidc'), 'auth_oidc');
             } else {
-                $iconcomponent = 'auth_oidc';
-                $iconkey = 'o365';
+                $icon = (!empty($this->config->icon)) ? $this->config->icon : 'auth_oidc:o365';
+                $icon = explode(':', $icon);
+                if (isset($icon[1])) {
+                    [$iconcomponent, $iconname] = $icon;
+                } else {
+                    $iconcomponent = 'auth_oidc';
+                    $iconname = 'o365';
+                }
+                $iconvalue = new pix_icon($iconname, get_string('pluginname', 'auth_oidc'), $iconcomponent);
             }
-            $icon = new pix_icon($iconkey, get_string('pluginname', 'auth_oidc'), $iconcomponent);
+            $idpentry['icon'] = $iconvalue;
+        }
+        return [$idpentry];
+    }
+
+    /**
+     * Validate that a URL is local to this Moodle installation.
+     *
+     * @param string $urlstring The URL to validate (as string).
+     * @return bool True if URL is safe to use as a redirect destination.
+     */
+    protected function is_valid_local_url(string $urlstring): bool {
+        global $CFG;
+
+        // Parse both URLs to compare components reliably.
+        $wwwroot = parse_url($CFG->wwwroot);
+        $checkurl = parse_url($urlstring);
+
+        if (!$wwwroot || !$checkurl) {
+            return false;
         }
 
-        return [
-            [
-                'url' => new moodle_url('/auth/oidc/', ['source' => 'loginpage']),
-                'icon' => $icon,
-                'name' => strip_tags(format_text($this->config->opname)),
-            ],
-        ];
+        // Scheme and host must match exactly.
+        if (($wwwroot['scheme'] ?? '') !== ($checkurl['scheme'] ?? '')) {
+            return false;
+        }
+        if (($wwwroot['host'] ?? '') !== ($checkurl['host'] ?? '')) {
+            return false;
+        }
+
+        // Port must match if present.
+        if (($wwwroot['port'] ?? null) !== ($checkurl['port'] ?? null)) {
+            return false;
+        }
+
+        return true;
     }
 
     /**
      * Get an OIDC parameter.
      *
-     * This is a modification to PARAM_ALPHANUMEXT to add a few additional characters from Base64-variants.
+     * Validates the parameter against visible ASCII characters (0x21-0x7E), excluding spaces.
+     * While RFC 6749 allows VSCHAR (0x20-0x7E), we exclude space for practical URL parsing safety.
+     * This allows authorization codes from any RFC-compliant OIDC provider that uses visible ASCII.
      *
      * @param string $name The name of the parameter.
      * @param string $fallback The fallback value.
@@ -94,7 +129,7 @@ class authcode extends base {
     protected function getoidcparam($name, $fallback = '') {
         $val = optional_param($name, $fallback, PARAM_RAW);
         $val = trim($val);
-        $valclean = preg_replace('/[^A-Za-z0-9\_\-\.\+\/\=]/i', '', $val);
+        $valclean = preg_replace('/[^\x21-\x7E]/', '', $val);
         if ($valclean !== $val) {
             utils::debug('Authorization error.', __METHOD__, $name);
             throw new moodle_exception('errorauthgeneral', 'auth_oidc');
@@ -117,14 +152,14 @@ class authcode extends base {
         if ($silentloginmode) {
             if ($error == 'login_required') {
                 // If silent login mode is enabled and the error is 'login_required', redirect to the login page.
-                $loginpageurl = new moodle_url('/login/index.php', ['noredirect' => 1]);
+                $loginpageurl = new url('/login/index.php', ['noredirect' => 1]);
                 redirect($loginpageurl);
                 die();
             } else if ($error == 'interaction_required') {
                 if (strpos($errordescription, 'multiple user identities') !== false) {
                     $selectaccount = true;
                 } else {
-                    $loginpageurl = new moodle_url('/login/index.php', ['noredirect' => 1]);
+                    $loginpageurl = new url('/login/index.php', ['noredirect' => 1]);
                     redirect($loginpageurl);
                     die();
                 }
@@ -164,13 +199,25 @@ class authcode extends base {
                     $urltogo = $SESSION->wantsurl;
                     unset($SESSION->wantsurl);
                 } else {
-                    $urltogo = new moodle_url('/');
+                    $urltogo = new url('/');
                 }
                 redirect($urltogo);
                 die();
             }
+            // Handle guest account session termination.
+            if (isguestuser()) {
+                \core\session\manager::terminate_current();
+            }
             // Initial login request.
             $stateparams = ['forceflow' => 'authcode'];
+            if (!empty($SESSION->wantsurl)) {
+                // Normalize to string in case it's a core\url object.
+                $wantsurl = ($SESSION->wantsurl instanceof url) ? $SESSION->wantsurl->out() : (string)$SESSION->wantsurl;
+                // Validate URL is local using safe domain comparison.
+                if ($this->is_valid_local_url($wantsurl)) {
+                    $stateparams['wantsurl'] = $wantsurl;
+                }
+            }
             $extraparams = [];
             if ($promptaconsent === true) {
                 $extraparams = ['prompt' => 'admin_consent'];
@@ -288,7 +335,7 @@ class authcode extends base {
         $event->trigger();
 
         $redirect = (!empty($additionaldata['redirect'])) ? $additionaldata['redirect'] : '/auth/oidc/ucp.php';
-        redirect(new moodle_url($redirect));
+        redirect(new url($redirect));
     }
 
     /**
@@ -388,7 +435,7 @@ class authcode extends base {
                 } else {
                     throw new moodle_exception('errorinvalidredirect_message', 'auth_oidc');
                 }
-                redirect(new moodle_url($redirect));
+                redirect(new url($redirect));
             }
 
             // If the user is already logged in we can treat this as a "migration" - a user switching to OIDC.
@@ -398,10 +445,22 @@ class authcode extends base {
             }
             $this->handlemigration($oidcuniqid, $authparams, $tokenparams, $idtoken, $connectiononly);
             $redirect = (!empty($additionaldata['redirect'])) ? $additionaldata['redirect'] : '/auth/oidc/ucp.php';
-            redirect(new moodle_url($redirect));
+            redirect(new url($redirect));
         } else {
             // Otherwise it's a user logging in normally with OIDC.
             $this->handlelogin($oidcuniqid, $authparams, $tokenparams, $idtoken);
+            if (!empty($additionaldata['wantsurl'])) {
+                // Normalize to string in case it's a core\url object from unserialization.
+                if ($additionaldata['wantsurl'] instanceof url) {
+                    $wantsurl = $additionaldata['wantsurl']->out();
+                } else {
+                    $wantsurl = (string)$additionaldata['wantsurl'];
+                }
+                // Validate URL is local using safe domain comparison.
+                if ($this->is_valid_local_url($wantsurl)) {
+                    $SESSION->wantsurl = $wantsurl;
+                }
+            }
             if ($USER->id && $DB->record_exists('auth_oidc_token', ['userid' => $USER->id])) {
                 $authoidsidrecord = new stdClass();
                 $authoidsidrecord->userid = $USER->id;
@@ -586,7 +645,9 @@ class authcode extends base {
             }
         }
 
-        $supportuseridentifierchangeconfig = get_config('local_o365', 'support_user_identifier_change');
+        $supportuseridentifierchangeconfig = auth_oidc_is_local_365_installed()
+            ? get_config('local_o365', 'support_user_identifier_change')
+            : 0;
 
         if (!empty($tokenrec)) {
             // Already connected user.
@@ -600,8 +661,8 @@ class authcode extends base {
                     $user = $DB->get_record('user', ['username' => $tokenrec->username]);
                 }
 
-                if (empty($user)) {
-                    // Token exists, but it doesn't have a valid username.
+                if (empty($user) || $user->username != strtolower($tokenrec->username)) {
+                    // Token exists, but it doesn't have a valid username or username doesn't match token.
                     // In this case, delete the token, and try to process login again.
                     $DB->delete_records('auth_oidc_token', ['id' => $tokenrec->id]);
                     return $this->handlelogin($oidcuniqid, $authparams, $tokenparams, $idtoken);
@@ -628,14 +689,14 @@ class authcode extends base {
                 if ($usernamechanged) {
                     if ($supportuseridentifierchangeconfig != 1) {
                         // Username change is not supported, throw exception.
-                        throw new moodle_exception('errorupnchangeisnotsupported', 'local_o365', null, null, '2');
+                        throw new moodle_exception('errorupnchangeisnotsupported', 'auth_oidc', null, null, '2');
                     }
                     $potentialduplicateuser = core_user::get_user_by_username(strtolower($oidcusername));
-                    if ($potentialduplicateuser) {
-                        // Username already exists, cannot change Moodle account username, throw exception.
+                    if ($potentialduplicateuser && $potentialduplicateuser->id != $tokenrec->userid) {
+                        // Username already exists in another user, cannot change Moodle account username, throw exception.
                         throw new moodle_exception('erroruserwithusernamealreadyexists', 'auth_oidc', null, null, '2');
                     } else {
-                        // Username does not exist:
+                        // Username does not exist or belongs to the same user:
                         // 1. can change Moodle account username (if the user uses auth_oidc),
                         // 2. can change token record.
                         if ($user->auth == 'oidc') {
@@ -691,7 +752,7 @@ class authcode extends base {
             // 3. update connection record in local_o365_objects table.
 
             if ($supportuseridentifierchangeconfig != 1) {
-                throw new moodle_exception('errorupnchangeisnotsupported', 'local_o365', null, null, '2');
+                throw new moodle_exception('errorupnchangeisnotsupported', 'auth_oidc', null, null, '2');
             }
 
             $existinguser = core_user::get_user($existingmatching->moodleid);
@@ -740,8 +801,10 @@ class authcode extends base {
             $this->createtoken($oidcuniqid, $username, $authparams, $tokenparams, $idtoken, 0, $originalupn);
 
             // Update connection record in local_o365_objects table.
-            $existingmatching->o365name = $oidcusername;
-            $DB->update_record('local_o365_objects', $existingmatching);
+            if (auth_oidc_is_local_365_installed()) {
+                $existingmatching->o365name = $oidcusername;
+                $DB->update_record('local_o365_objects', $existingmatching);
+            }
 
             $user = authenticate_user_login($username, '', true);
 

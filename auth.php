@@ -23,6 +23,8 @@
  * @copyright (C) 2014 onwards Microsoft, Inc. (http://microsoft.com/)
  */
 
+use core\url;
+
 defined('MOODLE_INTERNAL') || die();
 
 require_once($CFG->libdir . '/authlib.php');
@@ -105,6 +107,33 @@ class auth_plugin_oidc extends \auth_plugin_base {
     }
 
     /**
+     * Hook for overriding behaviour of logout page.
+     */
+    public function logoutpage_hook() {
+        global $redirect;
+
+        // No need for custom logic if we don't force the redirect on login.
+        if (!isset($this->config->forceredirect) || !$this->config->forceredirect) {
+            return;
+        }
+
+        // When we log out and are redirecting to the login page, add the noredirect to prevent our own redirect.
+        if (empty($redirect)) {
+            return;
+        }
+
+        $redirecturl = is_string($redirect) ? new url($redirect) : $redirect;
+        if (!($redirecturl instanceof url)) {
+            return;
+        }
+
+        if ($redirecturl->compare(new url('/login/index.php'), URL_MATCH_BASE)) {
+            $redirecturl->param('noredirect', 1);
+            $redirect = $redirecturl->out(false);
+        }
+    }
+
+    /**
      * Hook for overriding behaviour of login page.
      * This method is called from login/index.php page for all enabled auth plugins.
      */
@@ -123,7 +152,7 @@ class auth_plugin_oidc extends \auth_plugin_base {
      * @return bool If this returns true then redirect
      */
     public function should_login_redirect() {
-        global $CFG, $SESSION;
+        global $SESSION;
 
         $oidc = optional_param('oidc', null, PARAM_BOOL);
         // Also support noredirect param - used by other auth plugins.
@@ -145,17 +174,6 @@ class auth_plugin_oidc extends \auth_plugin_base {
         //
         // This isn't needed when duallogin is on because $oidc will default to 0 and duallogin is not part of the request.
         if ((isset($SESSION->oidc) && $SESSION->oidc == 0)) {
-            return false;
-        }
-
-        // If the user is redirectred to the login page immediately after logging out, don't redirect.
-        $silentloginmodesetting = get_config('auth_oidc', 'silentloginmode');
-        $forceredirectsetting = get_config('auth_oidc', 'forceredirect');
-        $forceloginsetting = get_config('core', 'forcelogin');
-        if (
-            $silentloginmodesetting && $forceredirectsetting && $forceloginsetting && isset($_SERVER['HTTP_REFERER']) &&
-            strpos($_SERVER['HTTP_REFERER'], $CFG->wwwroot) !== false
-        ) {
             return false;
         }
 
@@ -196,16 +214,16 @@ class auth_plugin_oidc extends \auth_plugin_base {
      * @param bool $justremovetokens If true, just remove the stored OIDC tokens for the user, otherwise revert login methods.
      * @param bool $donotremovetokens If true, do not remove tokens when disconnecting. This migrates from a login account to a
      *                                "linked" account.
-     * @param moodle_url|null $redirect Where to redirect if successful.
-     * @param moodle_url|null $selfurl The page this is accessed from. Used for some redirects.
+     * @param url|null $redirect Where to redirect if successful.
+     * @param url|null $selfurl The page this is accessed from. Used for some redirects.
      * @param null $userid
      * @return mixed
      */
     public function disconnect(
         $justremovetokens = false,
         $donotremovetokens = false,
-        ?\moodle_url $redirect = null,
-        ?\moodle_url $selfurl = null,
+        ?url $redirect = null,
+        ?url $selfurl = null,
         $userid = null
     ) {
         return $this->loginflow->disconnect($justremovetokens, $donotremovetokens, $redirect, $selfurl, $userid);
@@ -273,7 +291,7 @@ class auth_plugin_oidc extends \auth_plugin_base {
             if (!empty($tokenrec)) {
                 // If the token record username is out of sync (ie username changes), update it.
                 if ($tokenrec->username != $user->username) {
-                    $updatedtokenrec = new \stdClass();
+                    $updatedtokenrec = new stdClass();
                     $updatedtokenrec->id = $tokenrec->id;
                     $updatedtokenrec->username = $user->username;
                     $DB->update_record('auth_oidc_token', $updatedtokenrec);
@@ -285,7 +303,7 @@ class auth_plugin_oidc extends \auth_plugin_base {
                 $tokenrec = $DB->get_record('auth_oidc_token', ['username' => $username]);
                 if (!empty($tokenrec)) {
                     $tokenrec->userid = $user->id;
-                    $updatedtokenrec = new \stdClass();
+                    $updatedtokenrec = new stdClass();
                     $updatedtokenrec->id = $tokenrec->id;
                     $updatedtokenrec->userid = $user->id;
                     $DB->update_record('auth_oidc_token', $updatedtokenrec);
@@ -300,6 +318,46 @@ class auth_plugin_oidc extends \auth_plugin_base {
             ];
             $event = \auth_oidc\event\user_loggedin::create($eventdata);
             $event->trigger();
+        }
+    }
+
+    /**
+     * Build logout URL with appropriate IdP-specific parameters.
+     *
+     * @param string $logouturl Base logout URL from config.
+     * @param string $idptype IdP type (from constants).
+     * @param stdClass $user User object.
+     * @return string|null Logout URL, or null if logout should be skipped.
+     */
+    private function build_logout_url(string $logouturl, string $idptype, stdClass $user): ?string {
+        global $CFG, $DB;
+
+        $params = [
+            'post_logout_redirect_uri' => $CFG->wwwroot,
+        ];
+
+        switch ($idptype) {
+            case AUTH_OIDC_IDP_TYPE_MICROSOFT_ENTRA_ID:
+            case AUTH_OIDC_IDP_TYPE_MICROSOFT_IDENTITY_PLATFORM:
+                if (!$logouturl) {
+                    $logouturl = 'https://login.microsoftonline.com/organizations/oauth2/logout';
+                }
+                $url = new url($logouturl, $params);
+                return $url->out(false);
+
+            case AUTH_OIDC_IDP_TYPE_OTHER:
+                if (!$logouturl) {
+                    return null;
+                }
+                $token = $DB->get_record('auth_oidc_token', ['userid' => $user->id]);
+                if ($token) {
+                    $params['id_token_hint'] = $token->idtoken;
+                }
+                $url = new url($logouturl, $params);
+                return $url->out(false);
+
+            default:
+                return null;
         }
     }
 
@@ -326,21 +384,19 @@ class auth_plugin_oidc extends \auth_plugin_base {
                 }
             }
 
+            // Do not redirect to logout endpoint when using loginas feature.
+            if (!empty($user->loginascontext)) {
+                $redirect = false;
+            }
+
             if ($redirect) {
                 $logouturl = get_config('auth_oidc', 'logouturi');
-                if (!$logouturl) {
-                    $logouturl = 'https://login.microsoftonline.com/organizations/oauth2/logout?post_logout_redirect_uri=' .
-                        urlencode($CFG->wwwroot);
-                } else {
-                    if (
-                        preg_match("/^https:\/\/login.microsoftonline.com\//", $logouturl) &&
-                        preg_match("/\/oauth2\/logout$/", $logouturl)
-                    ) {
-                        $logouturl .= '?post_logout_redirect_uri=' . urlencode($CFG->wwwroot);
-                    }
-                }
+                $idptype = get_config('auth_oidc', 'idptype');
 
-                redirect($logouturl);
+                $redirecturl = $this->build_logout_url($logouturl, $idptype, $user);
+                if ($redirecturl) {
+                    redirect($redirecturl);
+                }
             }
         }
 

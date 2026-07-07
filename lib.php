@@ -26,6 +26,9 @@
 
 use auth_oidc\jwt;
 use auth_oidc\utils;
+use core\context\system;
+use core\context\user;
+use core\url;
 
 // IdP types.
 /**
@@ -82,6 +85,118 @@ const AUTH_OIDC_AUTH_CERT_SOURCE_TEXT = 1;
 const AUTH_OIDC_AUTH_CERT_SOURCE_FILE = 2;
 
 /**
+ * Callback invoked when application credentials or endpoint settings are updated.
+ *
+ * Clears cached application tokens and the setup verification result so that
+ * the connection is re-validated with the new values.
+ *
+ * @param string $settingname The full name of the setting that was updated.
+ * @return void
+ */
+function auth_oidc_reset_app_tokens($settingname) {
+    // Use a static flag so cache purging and token clearing only happen once per request,
+    // even when multiple settings with this callback change in the same save.
+    static $cachespurged = false;
+    if (!$cachespurged) {
+        unset_config('apptokens', 'local_o365');
+        unset_config('azuresetupresult', 'local_o365');
+        purge_all_caches();
+        $cachespurged = true;
+    }
+
+    if (auth_oidc_is_local_365_installed()) {
+        $idptype = get_config('auth_oidc', 'idptype');
+        if ($idptype && $idptype != AUTH_OIDC_IDP_TYPE_OTHER) {
+            // Use a static flag so only one notification is queued per request,
+            // even when multiple settings with this callback change in the same save.
+            static $notificationqueued = false;
+            if (!$notificationqueued) {
+                $localo365configurl = new \core\url('/admin/settings.php', ['section' => 'local_o365']);
+                \core\notification::warning(
+                    get_string('application_updated_microsoft_notify', 'auth_oidc', $localo365configurl->out())
+                );
+                $notificationqueued = true;
+            }
+        }
+    }
+}
+
+/**
+ * Validate authentication settings for invalid combinations.
+ *
+ * Checks for invalid combinations that could break authentication:
+ * - Certificate auth with Entra v1/Other IdP types (not supported)
+ * - Secret auth without a configured client secret
+ * - Certificate auth without required cert/key fields
+ *
+ * @param string $settingname The full name of the setting that was updated.
+ * @return void
+ */
+function auth_oidc_validate_auth_settings(string $settingname) {
+    $idptype = get_config('auth_oidc', 'idptype');
+    $clientauthmethod = get_config('auth_oidc', 'clientauthmethod');
+
+    if (empty($idptype) || empty($clientauthmethod)) {
+        return;
+    }
+
+    $errors = [];
+
+    // Validate clientauthmethod according to idptype.
+    if (in_array($idptype, [AUTH_OIDC_IDP_TYPE_MICROSOFT_ENTRA_ID, AUTH_OIDC_IDP_TYPE_OTHER])) {
+        if ($clientauthmethod != AUTH_OIDC_AUTH_METHOD_SECRET) {
+            $errors[] = get_string('error_invalid_client_authentication_method', 'auth_oidc');
+        }
+    } else if ($idptype == AUTH_OIDC_IDP_TYPE_MICROSOFT_IDENTITY_PLATFORM) {
+        if (!in_array($clientauthmethod, [AUTH_OIDC_AUTH_METHOD_SECRET, AUTH_OIDC_AUTH_METHOD_CERTIFICATE])) {
+            $errors[] = get_string('error_invalid_client_authentication_method', 'auth_oidc');
+        }
+    }
+
+    // Validate authentication-method-specific requirements.
+    if ($clientauthmethod == AUTH_OIDC_AUTH_METHOD_SECRET) {
+        $clientsecret = get_config('auth_oidc', 'clientsecret');
+        if (empty($clientsecret)) {
+            $errors[] = get_string('error_empty_client_secret', 'auth_oidc');
+        }
+    } else if ($clientauthmethod == AUTH_OIDC_AUTH_METHOD_CERTIFICATE) {
+        $clientcertsource = get_config('auth_oidc', 'clientcertsource');
+
+        if ($clientcertsource == AUTH_OIDC_AUTH_CERT_SOURCE_TEXT) {
+            $clientprivatekey = get_config('auth_oidc', 'clientprivatekey');
+            $clientcert = get_config('auth_oidc', 'clientcert');
+
+            if (empty($clientprivatekey)) {
+                $errors[] = get_string('error_empty_client_private_key', 'auth_oidc');
+            }
+            if (empty($clientcert)) {
+                $errors[] = get_string('error_empty_client_cert', 'auth_oidc');
+            }
+        } else if ($clientcertsource == AUTH_OIDC_AUTH_CERT_SOURCE_FILE) {
+            $clientprivatekeyfile = get_config('auth_oidc', 'clientprivatekeyfile');
+            $clientcertfile = get_config('auth_oidc', 'clientcertfile');
+
+            if (empty($clientprivatekeyfile)) {
+                $errors[] = get_string('error_empty_client_private_key_file', 'auth_oidc');
+            }
+            if (empty($clientcertfile)) {
+                $errors[] = get_string('error_empty_client_cert_file', 'auth_oidc');
+            }
+        }
+    }
+
+    // Notify admin if validation errors are found.
+    if (!empty($errors)) {
+        $message = get_string('auth_settings_validation_error', 'auth_oidc') . '<ul>';
+        foreach ($errors as $error) {
+            $message .= '<li>' . $error . '</li>';
+        }
+        $message .= '</ul>';
+        \core\notification::error($message);
+    }
+}
+
+/**
  * Initialize custom icon for OIDC authentication.
  *
  * This function sets up a custom icon for the OIDC plugin by creating necessary directories
@@ -94,7 +209,7 @@ function auth_oidc_initialize_customicon($filefullname) {
     global $CFG;
 
     $file = get_config('auth_oidc', 'customicon');
-    $systemcontext = \context_system::instance();
+    $systemcontext = system::instance();
     $fullpath = "/{$systemcontext->id}/auth_oidc/customicon/0{$file}";
 
     $fs = get_file_storage();
@@ -134,24 +249,24 @@ function auth_oidc_connectioncapability($userid, $mode = 'connect', $require = f
     if ($require) {
         // If requiring the capability and user has manageconnection than checking connect and disconnect is not needed.
         $check = 'require_capability';
-        if (has_capability('auth/oidc:manageconnection', \context_user::instance($userid), $userid)) {
+        if (has_capability('auth/oidc:manageconnection', user::instance($userid), $userid)) {
             return true;
         }
-    } else if ($check('auth/oidc:manageconnection', \context_user::instance($userid), $userid)) {
+    } else if ($check('auth/oidc:manageconnection', user::instance($userid), $userid)) {
         return true;
     }
 
     $result = false;
     switch ($mode) {
         case "connect":
-            $result = $check('auth/oidc:manageconnectionconnect', \context_user::instance($userid), $userid);
+            $result = $check('auth/oidc:manageconnectionconnect', user::instance($userid), $userid);
             break;
         case "disconnect":
-            $result = $check('auth/oidc:manageconnectiondisconnect', \context_user::instance($userid), $userid);
+            $result = $check('auth/oidc:manageconnectiondisconnect', user::instance($userid), $userid);
             break;
         case "both":
-            $result = $check('auth/oidc:manageconnectionconnect', \context_user::instance($userid), $userid);
-            $result = $result && $check('auth/oidc:manageconnectiondisconnect', \context_user::instance($userid), $userid);
+            $result = $check('auth/oidc:manageconnectionconnect', user::instance($userid), $userid);
+            $result = $result && $check('auth/oidc:manageconnectiondisconnect', user::instance($userid), $userid);
     }
     if ($require) {
         return true;
@@ -198,7 +313,7 @@ function auth_oidc_get_tokens_with_empty_ids() {
         $item->oidcuniqueid = $record->oidcuniqid;
         $item->matchingstatus = get_string('unmatched', 'auth_oidc');
         $item->details = get_string('na', 'auth_oidc');
-        $deletetokenurl = new moodle_url('/auth/oidc/cleanupoidctokens.php', ['id' => $record->id]);
+        $deletetokenurl = new url('/auth/oidc/cleanupoidctokens.php', ['id' => $record->id]);
         $item->action = html_writer::link($deletetokenurl, get_string('delete_token', 'auth_oidc'));
 
         $emptyuseridtokens[$record->id] = $item;
@@ -222,7 +337,7 @@ function auth_oidc_get_tokens_with_mismatched_usernames() {
               FROM {auth_oidc_token} tok
               JOIN {user} u ON u.id = tok.userid
              WHERE tok.userid != 0
-               AND u.username != tok.username';
+               AND LOWER(u.username) != LOWER(tok.username)';
     $records = $DB->get_recordset_sql($sql);
     foreach ($records as $record) {
         $item = new stdClass();
@@ -237,7 +352,7 @@ function auth_oidc_get_tokens_with_mismatched_usernames() {
             'auth_oidc',
             ['tokenusername' => $record->tokenusername, 'moodleusername' => $record->musername]
         );
-        $deletetokenurl = new moodle_url('/auth/oidc/cleanupoidctokens.php', ['id' => $record->id]);
+        $deletetokenurl = new url('/auth/oidc/cleanupoidctokens.php', ['id' => $record->id]);
         $item->action = html_writer::link($deletetokenurl, get_string('delete_token_and_reference', 'auth_oidc'));
 
         $mismatchedtokens[$record->id] = $item;
@@ -286,38 +401,56 @@ function auth_oidc_delete_token(int $tokenid): void {
 }
 
 /**
+ * Get validated custom claim names from configuration.
+ *
+ * Parses the customclaims configuration, validates claim name format, and returns
+ * the list of valid claim names to be used for token claim extraction and field mapping.
+ *
+ * @return array Array of validated custom claim names.
+ */
+function auth_oidc_get_validated_custom_claim_names() {
+    $customclaimsconfig = get_config('auth_oidc', 'customclaims');
+    if (empty($customclaimsconfig)) {
+        return [];
+    }
+
+    // Split by space, trim, remove empty values, and remove duplicates.
+    $customclaims = array_filter(array_map('trim', explode(' ', $customclaimsconfig)));
+    $customclaims = array_unique($customclaims);
+
+    $validated = [];
+    foreach ($customclaims as $claimname) {
+        // Validate claim name format (alphanumeric, underscore, hyphen only).
+        if (!preg_match('/^[a-zA-Z0-9_-]+$/', $claimname)) {
+            debugging("Invalid custom claim name skipped: $claimname", DEBUG_DEVELOPER);
+            continue;
+        }
+        $validated[] = $claimname;
+    }
+
+    return $validated;
+}
+
+/**
  * Process and add custom claims to remote fields array with validation.
  *
  * @param array $remotefields Existing remote fields array
  * @return array Updated remote fields array with validated custom claims
  */
 function auth_oidc_process_custom_claims($remotefields) {
-    $customclaimsconfig = get_config('auth_oidc', 'customclaims');
-    if (empty($customclaimsconfig)) {
-        return $remotefields;
-    }
-
-    // Split by space, trim, remove empty values, and remove duplicates.
-    $customclaimsarray = array_filter(array_map('trim', explode(' ', $customclaimsconfig)));
-    $customclaimsarray = array_unique($customclaimsarray);
+    $customclaims = auth_oidc_get_validated_custom_claim_names();
 
     // Get all existing field names as reserved to prevent overriding.
     $reserved = array_keys($remotefields);
 
-    foreach ($customclaimsarray as $value) {
-        // Validate claim name format (alphanumeric, underscore, hyphen only).
-        if (!preg_match('/^[a-zA-Z0-9_-]+$/', $value)) {
-            debugging("Invalid custom claim name skipped: $value", DEBUG_DEVELOPER);
-            continue;
-        }
-
+    foreach ($customclaims as $claimname) {
         // Prevent overriding existing fields.
-        if (in_array($value, $reserved, true)) {
-            debugging("Reserved custom claim name skipped: $value", DEBUG_DEVELOPER);
+        if (in_array($claimname, $reserved, true)) {
+            debugging("Reserved custom claim name skipped: $claimname", DEBUG_DEVELOPER);
             continue;
         }
 
-        $remotefields[$value] = $value;
+        $remotefields[$claimname] = $claimname;
     }
 
     return $remotefields;
@@ -607,7 +740,7 @@ function auth_oidc_display_auth_lock_options(
         // Generate the list of fields / mappings.
         if ($fieldnametoolong) {
             // Display a message that the field can not be mapped because it's too long.
-            $url = new moodle_url('/user/profile/index.php');
+            $url = new url('/user/profile/index.php');
             $a = (object)['fieldname' => s($fieldname), 'shortname' => s($field), 'charlimit' => 67, 'link' => $url->out()];
             $settings->add(new admin_setting_heading(
                 $auth . '/field_not_mapped_' . sha1($field),
@@ -919,4 +1052,41 @@ function auth_oidc_is_masked_secret($value) {
     // This matches both cases: secrets shorter than 2 chars (masked as **********)
     // and secrets 2+ chars (masked as XX**********).
     return preg_match('/^(.{2})?\*{10}$/', $value) === 1;
+}
+
+/**
+ * Build Bootstrap nav-tabs HTML for navigating between auth_oidc settings pages.
+ *
+ * Renders a row of tab links to each settings sub-page, with the current page
+ * marked as active. The "Binding username claim" tab is only included if IdP type
+ * is configured, since the corresponding settings page is only registered in that case.
+ *
+ * @param string $currentpage Section ID of the currently active page.
+ * @return string HTML for the navigation bar.
+ */
+function auth_oidc_get_settings_nav_html(string $currentpage): string {
+    $pages = [
+        'auth_oidc_application' => get_string('settings_page_application', 'auth_oidc'),
+    ];
+
+    // Only include the binding username claim tab if IdP type is configured.
+    $idptype = get_config('auth_oidc', 'idptype');
+    if ($idptype) {
+        $pages['auth_oidc_binding_username_claim'] = get_string('settings_page_binding_username_claim', 'auth_oidc');
+    }
+
+    $pages += [
+        'auth_oidc_other_settings' => get_string('settings_page_other_settings', 'auth_oidc'),
+        'auth_oidc_field_mapping' => get_string('settings_page_field_mapping', 'auth_oidc'),
+    ];
+
+    $html = html_writer::start_tag('ul', ['class' => 'nav nav-tabs mb-3']);
+    foreach ($pages as $section => $label) {
+        $url = new \core\url('/admin/settings.php', ['section' => $section]);
+        $linkattrs = ['class' => 'nav-link' . ($section === $currentpage ? ' active' : '')];
+        $html .= html_writer::tag('li', html_writer::link($url, $label, $linkattrs), ['class' => 'nav-item']);
+    }
+    $html .= html_writer::end_tag('ul');
+
+    return $html;
 }

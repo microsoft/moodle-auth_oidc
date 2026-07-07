@@ -24,16 +24,19 @@
  */
 
 use auth_oidc\form\application;
+use core\context\system;
+use core\url;
 
 require_once(dirname(__FILE__) . '/../../config.php');
 require_once($CFG->libdir . '/adminlib.php');
+require_once($CFG->libdir . '/formslib.php');
 require_once($CFG->dirroot . '/auth/oidc/lib.php');
 
 require_login();
 
-$url = new moodle_url('/auth/oidc/manageapplication.php');
+$url = new url('/auth/oidc/manageapplication.php');
 $PAGE->set_url($url);
-$PAGE->set_context(context_system::instance());
+$PAGE->set_context(system::instance());
 $PAGE->set_pagelayout('admin');
 $PAGE->set_heading(get_string('settings_page_application', 'auth_oidc'));
 $PAGE->set_title(get_string('settings_page_application', 'auth_oidc'));
@@ -46,7 +49,7 @@ $jsmodule = [
 ];
 $PAGE->requires->js_init_call('M.auth_oidc.init', $jsparams, true, $jsmodule);
 
-admin_externalpage_setup('auth_oidc_application');
+navigation_node::require_admin_tree();
 
 require_admin();
 
@@ -186,7 +189,7 @@ if ($form->is_cancelled()) {
             purge_all_caches();
 
             // Then show the message to the user with instructions to update the application token.
-            $localo365configurl = new moodle_url('/admin/settings.php', ['section' => 'local_o365']);
+            $localo365configurl = new url('/admin/settings.php', ['section' => 'local_o365']);
             redirect($localo365configurl, get_string('application_updated_microsoft', 'auth_oidc'));
         } else {
             redirect($url, get_string('application_updated', 'auth_oidc'));

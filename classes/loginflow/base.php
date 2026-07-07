@@ -29,6 +29,8 @@ namespace auth_oidc\loginflow;
 use auth_oidc\jwt;
 use auth_oidc\oidcclient;
 use auth_oidc\utils;
+use core\context\system;
+use core\url;
 use core_user;
 use moodle_exception;
 use stdClass;
@@ -141,6 +143,17 @@ class base {
                         $userdata = $apiclient->get_user($tokenrec->oidcuniqid);
                         if ($userdata) {
                             $userdatafetchedfromgraph = true;
+                            // Add custom claims from tokens even when using Graph API.
+                            $tokenames = ['idtoken', 'token'];
+                            foreach ($tokenames as $tokename) {
+                                try {
+                                    $token = jwt::instance_from_encoded($tokenrec->$tokename);
+                                    $this->add_configured_custom_claims_to_userdata($userdata, $token);
+                                } catch (moodle_exception $e) {
+                                    // Error occurred when decoding a token, skip.
+                                    continue;
+                                }
+                            }
                         }
                     }
                 }
@@ -213,6 +226,8 @@ class base {
                                 $userdata['bindingusernameclaim'] = $token->claim($bindingusernameclaim);
                             }
                         }
+
+                        $this->add_configured_custom_claims_to_userdata($userdata, $token);
                     }
                 }
 
@@ -300,6 +315,8 @@ class base {
                         $userdata['bindingusernameclaim'] = $token->claim($bindingusernameclaim);
                     }
                 }
+
+                $this->add_configured_custom_claims_to_userdata($userdata, $token);
             }
 
             $updateduser = static::apply_configured_fieldmap_from_token($userdata, $eventtype);
@@ -353,23 +370,23 @@ class base {
      * @param bool $justremovetokens If true, just remove the stored OIDC tokens for the user; otherwise, revert login methods.
      * @param bool $donotremovetokens If true, do not remove tokens when disconnecting. This migrates from a login account
      *                                to a "linked" account.
-     * @param \moodle_url|null $redirect URL to redirect to if successful.
-     * @param \moodle_url|null $selfurl The page this is accessed from, used for some redirects.
+     * @param url|null $redirect URL to redirect to if successful.
+     * @param url|null $selfurl The page this is accessed from, used for some redirects.
      * @param int|null $userid ID of the user to disconnect; uses the current user if not provided.
      */
     public function disconnect(
         $justremovetokens = false,
         $donotremovetokens = false,
-        ?\moodle_url $redirect = null,
-        ?\moodle_url $selfurl = null,
+        ?url $redirect = null,
+        ?url $selfurl = null,
         $userid = null
     ) {
         global $USER, $DB, $CFG;
         if ($redirect === null) {
-            $redirect = new \moodle_url('/auth/oidc/ucp.php');
+            $redirect = new url('/auth/oidc/ucp.php');
         }
         if ($selfurl === null) {
-            $selfurl = new \moodle_url('/auth/oidc/ucp.php', ['action' => 'disconnectlogin']);
+            $selfurl = new url('/auth/oidc/ucp.php', ['action' => 'disconnectlogin']);
         }
 
         // Get the record of the user involved. Current user if no ID received.
@@ -393,7 +410,7 @@ class base {
             global $OUTPUT, $PAGE;
             require_once($CFG->dirroot . '/user/lib.php');
             $PAGE->set_url($selfurl->out());
-            $PAGE->set_context(\context_system::instance());
+            $PAGE->set_context(system::instance());
             $PAGE->set_pagelayout('standard');
             $USER->editing = false;
 
@@ -793,5 +810,29 @@ class base {
         }
 
         return $oidcusername;
+    }
+
+    /**
+     * Add configured custom claims from a token into the user data array.
+     *
+     * @param array $userdata User data array to update.
+     * @param jwt $token The JWT token to extract claims from.
+     */
+    protected function add_configured_custom_claims_to_userdata(array &$userdata, jwt $token): void {
+        $customclaims = auth_oidc_get_validated_custom_claim_names();
+        if (empty($customclaims)) {
+            return;
+        }
+
+        foreach ($customclaims as $claimname) {
+            if (isset($userdata[$claimname])) {
+                continue;
+            }
+
+            $claimvalue = $token->claim($claimname);
+            if (is_scalar($claimvalue) && $claimvalue !== null && $claimvalue !== '') {
+                $userdata[$claimname] = $claimvalue;
+            }
+        }
     }
 }
