@@ -43,6 +43,8 @@ $string['heading_basic'] = 'Basic settings';
 $string['heading_basic_desc'] = '';
 $string['heading_additional_options'] = 'Additional options';
 $string['heading_additional_options_desc'] = '';
+$string['heading_stateredirect'] = 'Login state error page';
+$string['heading_stateredirect_desc'] = 'By default, if a user takes too long to complete login at the identity provider (for example, while approving a multi-factor authentication prompt) and the stored login state has since been cleaned up, Moodle shows its generic error page. The settings below let you extend how long login state is kept, and let you show a friendlier, customizable message instead of the generic error page, automatically redirecting the user back to the login page.';
 $string['heading_user_restrictions'] = 'User restrictions';
 $string['heading_user_restrictions_desc'] = '';
 $string['heading_sign_out'] = 'Sign out integration';
@@ -111,38 +113,34 @@ $string['cfg_domainhint_desc'] = 'When using the <b>Authorization Code</b> login
 $string['cfg_err_invalidauthendpoint'] = 'Invalid Authorization Endpoint';
 $string['cfg_err_invalidtokenendpoint'] = 'Invalid Token Endpoint';
 $string['cfg_err_invalidclientid'] = 'Invalid client ID';
-$string['error_masked_secret_not_changed'] = 'Please enter a new value. The masked value cannot be saved.';
 $string['cfg_err_invalidclientsecret'] = 'Invalid client secret';
 $string['cfg_forceredirect_key'] = 'Force redirect';
 $string['cfg_forceredirect_desc'] = 'If enabled, will skip the login index page and redirect to the OpenID Connect page. Can be bypassed with ?noredirect=1 URL param';
+$string['cfg_stateexpiry_key'] = 'Login state expiry (minutes)';
+$string['cfg_stateexpiry_desc'] = 'How long a login state record is kept before the scheduled cleanup task removes it. Increase this if users regularly take longer than this to complete login at the identity provider (for example, due to multi-factor authentication prompts).';
+$string['error_stateexpiry_min'] = 'The login state expiry must be at least 1 minute. A value of zero or less would cause logins that are currently in progress to fail.';
+$string['cfg_stateredirect_enabled_key'] = 'Show friendly error page';
+$string['cfg_stateredirect_enabled_desc'] = 'If enabled, a user who takes too long to complete login at the identity provider (so that the stored login state has since been cleaned up) is shown the customizable message below and automatically redirected back to the login page, instead of Moodle\'s generic error page.';
+$string['cfg_stateredirect_message_key'] = 'Message';
+$string['cfg_stateredirect_message_desc'] = 'The message to display to the user on the friendly error page.';
+$string['cfg_stateredirect_message_default'] = 'There was a problem logging you in. This is most likely because the login took too long to complete (for example, while approving a multi-factor authentication prompt). You will be redirected to the login page automatically so you can try again.';
+$string['cfg_stateredirect_delay_key'] = 'Redirect delay (seconds)';
+$string['cfg_stateredirect_delay_desc'] = 'The number of seconds to show the message above before automatically redirecting the user back to the login page.';
 $string['cfg_set_pix_key'] = 'Show icon on login page';
 $string['cfg_set_pix_desc'] = 'If enabled, displays an icon next to the provider name on the login page.';
 $string['cfg_icon_key'] = 'Icon';
 $string['cfg_icon_desc'] = 'An icon to display next to the provider name on the login page.';
-$string['cfg_iconalt_o365'] = 'Microsoft 365 icon';
-$string['cfg_iconalt_locked'] = 'Locked icon';
-$string['cfg_iconalt_lock'] = 'Lock icon';
-$string['cfg_iconalt_go'] = 'Green circle';
-$string['cfg_iconalt_stop'] = 'Red circle';
-$string['cfg_iconalt_user'] = 'User icon';
-$string['cfg_iconalt_user2'] = 'User icon alternate';
-$string['cfg_iconalt_key'] = 'Key icon';
-$string['cfg_iconalt_group'] = 'Group icon';
-$string['cfg_iconalt_group2'] = 'Group icon alternate';
-$string['cfg_iconalt_mnet'] = 'MNET icon';
-$string['cfg_iconalt_userlock'] = 'User with lock icon';
-$string['cfg_iconalt_plus'] = 'Plus icon';
-$string['cfg_iconalt_check'] = 'Checkmark icon';
-$string['cfg_iconalt_rightarrow'] = 'Right-facing arrow icon';
+$string['cfg_iconalt_o365'] = 'Office 365 icon';
+$string['cfg_iconalt_microsoft365'] = 'Microsoft 365 logo';
+$string['cfg_iconalt_openid'] = 'OpenID icon';
+$string['cfg_iconalt_keycloak'] = 'Keycloak icon';
 $string['cfg_customicon_key'] = 'Custom Icon';
-$string['cfg_customicon_desc'] = 'If you\'d like to use your own icon, upload it here. This overrides any icon chosen above. <br /><br /><b>Notes on using custom icons:</b><ul><li>This image will <b>not</b> be resized on the login page, so we recommend uploading an image no bigger than 35x35 pixels.</li><li>If you have uploaded a custom icon and want to go back to one of the stock icons, click the custom icon in the box above, then click "Delete", then click "OK", then click "Save Changes" at the bottom of this form. The selected stock icon will now appear on the Moodle login page.</li></ul>';
+$string['cfg_customicon_desc'] = 'If you\'d like to use your own icon, upload it here. This overrides any icon chosen above. <br /><br /><b>Notes on using custom icons:</b><ul><li>The uploaded file is not resized. It will be displayed at a fixed size of 24x24 pixels on the login page, with your browser scaling it to fit, so we recommend uploading a square image to avoid distortion.</li><li>If you have uploaded a custom icon and want to go back to one of the stock icons, click the custom icon in the box above, then click "Delete", then click "OK", then click "Save Changes" at the bottom of this form. The selected stock icon will now appear on the Moodle login page.</li></ul>';
 $string['cfg_debugmode_key'] = 'Record debug messages';
 $string['cfg_debugmode_desc'] = 'If enabled, information will be logged to the Moodle log that can help in identifying problems.';
 $string['cfg_loginflow_key'] = 'Login Flow';
 $string['cfg_loginflow_authcode'] = 'Authorization Code Flow <b>(recommended)</b>';
 $string['cfg_loginflow_authcode_desc'] = 'Using this flow, the user clicks the name of the IdP (See "Provider Display Name" above) on the Moodle login page and is redirected to the provider to log in. Once successfully logged in, the user is redirected back to Moodle where the Moodle login takes place transparently. This is the most standardized, secure way for the user log in.';
-$string['cfg_loginflow_rocreds'] = 'Resource Owner Password Credentials Grant <b>(deprecated)</b>';
-$string['cfg_loginflow_rocreds_desc'] = '<b>This login flow is deprecated and will be removed from the plugin soon.</b><br/>Using this flow, the user enters their username and password into the Moodle login form like they would with a manual login. This will authorize the user with the IdP, but will not create a session on the IdP\'s site. For example, if using Microsoft 365 with OpenID Connect, the user will be logged in to Moodle but not the Microsoft 365 web applications. Using the authorization request is recommended if you want users to be logged in to both Moodle and the IdP. Note that not all IdP support this flow. This option should only be used when other authorization grant types are not available.';
 $string['cfg_silentloginmode_key'] = 'Silent Login Mode';
 $string['cfg_silentloginmode_desc'] = 'If enabled, Moodle will try to use the active session of a user authenticated to the configured authorization endpoint to log the user in.<br/>
 To use this feature, the following configurations are required:
@@ -175,7 +173,8 @@ $string['customclaims_help'] = 'Space-separated list of custom claim names from 
 </ul>';
 $string['secretexpiryrecipients'] = 'Secret Expiry Notification Recipients';
 $string['secretexpiryrecipients_help'] = 'A comma-separated list of email addresses to send secret expiry notifications to.<br/>
-If no email address is entered, the main site administrator will be notified.';
+If no email address is entered, the main site administrator will be notified.<br/>
+By default, notifications are sent daily from four weeks before expiry until the secret has been renewed.';
 $string['cfg_opname_key'] = 'Provider Display Name';
 $string['cfg_opname_desc'] = 'This is an end-user-facing label that identifies the type of credentials the user must use to login. This label is used throughout the user-facing portions of this plugin to identify your provider.';
 $string['cfg_redirecturi_key'] = 'Redirect URI';
@@ -236,7 +235,6 @@ $string['errorauthdisconnectusernameexists'] = 'That username is already taken. 
 $string['errorauthdisconnectnewmethod'] = 'Use Login Method';
 $string['errorauthdisconnectinvalidmethod'] = 'Invalid login method received.';
 $string['errorauthdisconnectifmanual'] = 'If using the manual login method, enter credentials below.';
-$string['errorauthdisconnectinvalidmethod'] = 'Invalid login method received.';
 $string['errorauthgeneral'] = 'There was a problem logging you in. Please contact your administrator for assistance.';
 $string['errorauthinvalididtoken'] = 'Invalid id_token received.';
 $string['errorauthloginfailednouser'] = 'Invalid login: User not found in Moodle. If this site has the "authpreventaccountcreation" setting enabled, this may mean you need an administrator to create an account for you first.';
@@ -283,6 +281,9 @@ $string['error_endpoint_mismatch_token_endpoint'] = 'The configured token endpoi
 $string['error_tenant_specific_endpoint_required'] = 'When using "Microsoft identity platform (v2.0)" IdP type and "Certificate" authentication method, tenant specific endpoint (i.e. not common/organizations/consumers) is required.';
 $string['error_empty_oidcresource'] = 'Resource cannot be empty when using Microsoft Entra ID (v1.0) or other types of IdP.';
 $string['error_invalid_custom_claim'] = 'Invalid custom claim name. Custom claims can only contain alphanumeric characters, hyphens, and underscores.';
+$string['error_masked_secret_not_changed'] = 'Please enter a new value or uncheck the "Change" checkbox to keep the current value.';
+$string['error_secretexpiryrecipients_invalid'] = 'The following secret expiry notification recipients are not valid email addresses: {$a}';
+$string['auth_settings_validation_error'] = 'Invalid authentication settings detected. The following configuration issues must be resolved to ensure successful authentication:';
 $string['errorupnchangeisnotsupported'] = 'Your Microsoft account UPN has changed. Please contact your administrator to update your Moodle account.';
 $string['erroruserwithusernamealreadyexists'] = 'Error occurred when trying to rename your Moodle account. A Moodle user with the new username already exists. Ask your site administrator to resolve this first.';
 $string['error_no_response_available'] = 'No responses available.';
@@ -320,6 +321,8 @@ $string['privacy:metadata:auth_oidc_sid'] = 'IdP session identifiers (sid) used 
 $string['privacy:metadata:auth_oidc_sid:userid'] = 'The ID of the Moodle user';
 $string['privacy:metadata:auth_oidc_sid:sid'] = 'The IdP session identifier (sid)';
 $string['privacy:metadata:auth_oidc_sid:timecreated'] = 'The time when the mapping was created';
+$string['privacy:metadata:auth_oidc_sid:sessionid'] = 'The Moodle session id active at the time the mapping was created';
+$string['privacy:metadata:auth_oidc_sid:iss'] = 'The issuer (iss claim) of the id_token the mapping was created from';
 
 // In the following strings, $a refers to a customizable name for the identity manager. For example, this could be
 // "Microsoft 365", "OpenID Connect", etc.
@@ -461,6 +464,7 @@ $string['binding_username_claim_help_non_ms'] = 'The options for Microsoft IdP w
 <li><b>custom</b>: Custom claim.</li>
 </ul>';
 $string['binding_username_claim_updated'] = 'Binding username claim was updated successfully.';
+$string['warning_binding_username_claim_custom_unsupported'] = 'The "Binding username claim" setting is currently set to "Custom", which is not supported for the configured IdP type with user sync enabled. Review the <a href="{$a}">Binding username claim</a> settings.';
 $string['examplecsv'] = 'Example upload file';
 $string['usernamefile'] = 'File';
 $string['csvdelimiter'] = 'CSV separator';

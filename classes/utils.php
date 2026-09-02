@@ -28,6 +28,7 @@ namespace auth_oidc;
 use Exception;
 use moodle_exception;
 use auth_oidc\event\action_failed;
+use core\context\system;
 use core\url;
 
 /**
@@ -251,5 +252,162 @@ class utils {
         global $CFG;
 
         return $CFG->dataroot . '/microsoft_certs';
+    }
+
+    /**
+     * Add a unique constraint on (oidcuniqid, tokenresource) to the auth_oidc_token table, removing duplicate
+     * tokens first.
+     *
+     * Removes duplicate tokens, keeping the latest one for each (oidcuniqid, tokenresource) pair.
+     * Uses a temporary table to work around MySQL error 1093 and PostgreSQL parameter limits.
+     *
+     * The combined length of oidcuniqid (255 chars) and tokenresource (127 chars) exceeds the byte
+     * limit the XMLDB API enforces on composed indexes (xmldb_index::INDEX_COMPOSED_MAX_BYTES), even
+     * though both MySQL and PostgreSQL can create the index without issue. So the index is created
+     * with raw SQL instead of $dbman->add_index(), with the index name manually prefixed with the
+     * site's table prefix to avoid name collisions with other prefixes (e.g. PHPUnit or Behat test
+     * tables) sharing the same database/schema.
+     */
+    public static function add_token_unique_constraint(): void {
+        global $DB;
+
+        $dbman = $DB->get_manager();
+        $table = new \xmldb_table('auth_oidc_token');
+        $index = new \xmldb_index('oidcuniqid-tokenresource', XMLDB_INDEX_UNIQUE, ['oidcuniqid', 'tokenresource']);
+
+        if ($dbman->index_exists($table, $index)) {
+            // Unique constraint already present, nothing to do.
+            return;
+        }
+
+        // Deliberately let any failure here propagate: swallowing it would let the calling
+        // upgrade step reach its savepoint even though the uniqueness guarantee was never
+        // established, silently leaving the database inconsistent with the code.
+        $temptable = 'auth_oidc_token_keep_ids';
+
+        // Step 1: Create a temporary table with the IDs to keep.
+        $sql = "CREATE TEMPORARY TABLE {" . $temptable . "} (id INT PRIMARY KEY)";
+        $DB->execute($sql);
+
+        // Step 2: Insert the IDs to keep (latest token for each oidcuniqid, tokenresource pair).
+        $sql = "INSERT INTO {" . $temptable . "} (id)
+                SELECT MAX(id) FROM {auth_oidc_token}
+                GROUP BY oidcuniqid, tokenresource";
+        $DB->execute($sql);
+
+        // Step 3: Delete duplicates not in the temporary table.
+        $sql = "DELETE FROM {auth_oidc_token} WHERE id NOT IN (SELECT id FROM {" . $temptable . "})";
+        $DB->execute($sql);
+
+        // Step 4: Drop the temporary table (automatic on transaction end, but explicit for clarity).
+        // Note: PostgreSQL does not accept the TEMPORARY keyword in DROP TABLE (only in CREATE
+        // TABLE), so plain DROP TABLE is used here; it works for temporary tables on MySQL too.
+        $sql = "DROP TABLE IF EXISTS {" . $temptable . "}";
+        $DB->execute($sql);
+
+        // Step 5: Add unique constraint on (oidcuniqid, tokenresource) to prevent duplicate tokens.
+        $indexname = $DB->get_prefix() . 'authoidctoken_uniq_ix';
+        $sql = "CREATE UNIQUE INDEX {$indexname} ON {auth_oidc_token} (oidcuniqid, tokenresource)";
+        $DB->execute($sql);
+    }
+
+    /**
+     * Migrate a site's selected stock icon to the custom icon setting if it used one of the
+     * icon choices that have been removed from the icon selector.
+     *
+     * The 'auth_oidc/icon' setting stores a "component:pix" identifier. The set of stock
+     * choices has been reduced to a handful of icons relevant to this plugin; any site that had
+     * selected one of the removed choices (all generic core Moodle icons) needs that icon copied
+     * into the custom icon file area so the login page keeps showing the same image.
+     *
+     * Safe to call more than once: once a site has been migrated (or its 'icon' setting was
+     * never one of the removed choices), every subsequent call is a no-op, since the checks
+     * above always return early once either 'auth_oidc/icon' is empty/unset or
+     * 'auth_oidc/customicon' is populated. The file and config writes are wrapped in a
+     * delegated transaction so a failure partway through can't leave those two settings out of
+     * sync with each other, which is what the early-return checks rely on.
+     */
+    public static function migrate_removed_icon_choices(): void {
+        global $CFG, $DB;
+
+        $currenticon = get_config('auth_oidc', 'icon');
+        if (empty($currenticon)) {
+            return;
+        }
+
+        if (!empty(get_config('auth_oidc', 'customicon'))) {
+            // A custom icon is already in use and takes priority, so the stock icon setting is
+            // not currently affecting what is displayed. Nothing to migrate.
+            return;
+        }
+
+        // Icons that have simply been replaced with another stock icon: the choice was removed
+        // from the selector but a suitable replacement exists, so just point the setting at it.
+        $remappedicons = [
+            'auth_oidc:o365' => 'auth_oidc:office_365',
+            // The Microsoft 365 logo is now the single icon used for both Microsoft and Microsoft 365.
+            'auth_oidc:microsoft' => 'auth_oidc:microsoft_365',
+            'auth_oidc:microsoft_365_copilot' => 'auth_oidc:microsoft_365',
+        ];
+        if (isset($remappedicons[$currenticon])) {
+            set_config('icon', $remappedicons[$currenticon], 'auth_oidc');
+            return;
+        }
+
+        $keepicons = [
+            'auth_oidc:microsoft_365',
+            'auth_oidc:office_365',
+            'auth_oidc:openid',
+            'auth_oidc:keycloak',
+        ];
+        if (in_array($currenticon, $keepicons, true)) {
+            return;
+        }
+
+        $parts = explode(':', $currenticon, 2);
+        if (count($parts) !== 2) {
+            return;
+        }
+        [, $pix] = $parts;
+
+        $sourcefile = null;
+        $extension = null;
+        foreach (['svg', 'png', 'gif', 'jpg', 'jpeg'] as $candidateextension) {
+            $candidatefile = "{$CFG->dirroot}/pix/{$pix}.{$candidateextension}";
+            if (file_exists($candidatefile)) {
+                $sourcefile = $candidatefile;
+                $extension = $candidateextension;
+                break;
+            }
+        }
+        if ($sourcefile === null) {
+            // Can't locate the source image for the removed choice, so there is nothing to copy.
+            return;
+        }
+
+        $systemcontext = system::instance();
+        $fs = get_file_storage();
+        $filename = 'migrated_' . clean_param(str_replace('/', '_', $pix), PARAM_FILE) . '.' . $extension;
+        $filerecord = [
+            'contextid' => $systemcontext->id,
+            'component' => 'auth_oidc',
+            'filearea' => 'customicon',
+            'itemid' => 0,
+            'filepath' => '/',
+            'filename' => $filename,
+        ];
+
+        // Wrapped in a transaction so a failure partway through (e.g. the file write succeeding
+        // but a config write failing) can't leave 'icon' and 'customicon' out of sync, which
+        // would break the early-return guards above on any later call.
+        $transaction = $DB->start_delegated_transaction();
+        $fs->delete_area_files($systemcontext->id, 'auth_oidc', 'customicon', 0);
+        $fs->create_file_from_pathname($filerecord, $sourcefile);
+        set_config('customicon', '/' . $filename, 'auth_oidc');
+        unset_config('icon', 'auth_oidc');
+        $transaction->allow_commit();
+
+        require_once($CFG->dirroot . '/auth/oidc/lib.php');
+        auth_oidc_initialize_customicon('/' . $filename);
     }
 }

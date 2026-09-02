@@ -24,6 +24,8 @@
  * @copyright (C) 2014 onwards Microsoft, Inc. (http://microsoft.com/)
  */
 
+use auth_oidc\utils;
+
 defined('MOODLE_INTERNAL') || die();
 
 require_once($CFG->dirroot . '/auth/oidc/lib.php');
@@ -582,48 +584,95 @@ function xmldb_auth_oidc_upgrade($oldversion) {
     }
 
     if ($oldversion < 2025100601.01) {
-        upgrade_auth_oidc_add_token_constraint();
+        utils::add_token_unique_constraint();
         upgrade_plugin_savepoint(true, 2025100601.01, 'auth', 'oidc');
     }
 
-    return true;
-}
+    if ($oldversion < 2026042000.01) {
+        // The rocreds (Resource Owner Password Credentials Grant) login flow has been removed.
+        // Reset any site still configured to use it back to the authcode flow.
+        if (get_config('auth_oidc', 'loginflow') === 'rocreds') {
+            set_config('loginflow', 'authcode', 'auth_oidc');
+        }
 
-/**
- * Helper function to add unique constraint and remove duplicate tokens.
- *
- * Removes duplicate tokens, keeping the latest one for each (oidcuniqid, tokenresource) pair.
- * Uses a temporary table to work around MySQL error 1093 and PostgreSQL parameter limits.
- */
-function upgrade_auth_oidc_add_token_constraint(): void {
-    global $DB;
-
-    try {
-        $temptable = 'auth_oidc_token_keep_ids';
-
-        // Step 1: Create a temporary table with the IDs to keep.
-        $sql = "CREATE TEMPORARY TABLE {" . $temptable . "} (id INT PRIMARY KEY)";
-        $DB->execute($sql);
-
-        // Step 2: Insert the IDs to keep (latest token for each oidcuniqid, tokenresource pair).
-        $sql = "INSERT INTO {" . $temptable . "} (id)
-                SELECT MAX(id) FROM {auth_oidc_token}
-                GROUP BY oidcuniqid, tokenresource";
-        $DB->execute($sql);
-
-        // Step 3: Delete duplicates not in the temporary table.
-        $sql = "DELETE FROM {auth_oidc_token} WHERE id NOT IN (SELECT id FROM {" . $temptable . "})";
-        $DB->execute($sql);
-
-        // Step 4: Drop the temporary table (automatic on transaction end, but explicit for clarity).
-        $sql = "DROP TEMPORARY TABLE IF EXISTS {" . $temptable . "}";
-        $DB->execute($sql);
-
-        // Step 5: Add unique constraint on (oidcuniqid, tokenresource) to prevent duplicate tokens.
-        // Use CREATE UNIQUE INDEX which works on both MySQL and PostgreSQL.
-        $sql = 'CREATE UNIQUE INDEX idx_oidc_unique ON {auth_oidc_token} (oidcuniqid, tokenresource)';
-        $DB->execute($sql);
-    } catch (Exception $e) {
-        unset($e);
+        upgrade_plugin_savepoint(true, 2026042000.01, 'auth', 'oidc');
     }
+
+    if ($oldversion < 2026042000.02) {
+        // Retry adding the unique constraint: the previous (2025100601.01) attempt used a helper
+        // that silently swallowed failures, so sites where that step failed never got the
+        // constraint despite passing the savepoint. utils::add_token_unique_constraint() is
+        // idempotent (checks index_exists() first), so this is a no-op where .01 already succeeded.
+        utils::add_token_unique_constraint();
+        upgrade_plugin_savepoint(true, 2026042000.02, 'auth', 'oidc');
+    }
+
+    if ($oldversion < 2026042000.04) {
+        // Widen the sid field on auth_oidc_sid: it stores the session_state parameter, which can
+        // exceed 36 characters (e.g. two GUIDs joined by a dot), not a fixed-length identifier.
+        $table = new xmldb_table('auth_oidc_sid');
+        $field = new xmldb_field('sid', XMLDB_TYPE_CHAR, '255', null, XMLDB_NOTNULL, null, null, 'userid');
+        $index = new xmldb_index('sid', XMLDB_INDEX_NOTUNIQUE, ['sid']);
+
+        if ($dbman->field_exists($table, $field)) {
+            // The sid index depends on this field, so the DDL layer refuses to alter it in
+            // place (ddl_dependency_exception); drop the index first and recreate it once the
+            // field has been widened.
+            if ($dbman->index_exists($table, $index)) {
+                $dbman->drop_index($table, $index);
+            }
+
+            $dbman->change_field_precision($table, $field);
+
+            if (!$dbman->index_exists($table, $index)) {
+                $dbman->add_index($table, $index);
+            }
+        }
+
+        // Oidc savepoint reached.
+        upgrade_plugin_savepoint(true, 2026042000.04, 'auth', 'oidc');
+    }
+
+    if ($oldversion < 2026042000.05) {
+        \auth_oidc\utils::migrate_removed_icon_choices();
+        upgrade_plugin_savepoint(true, 2026042000.05, 'auth', 'oidc');
+    }
+
+    if ($oldversion < 2026042000.06) {
+        // Define field sessionid to be added to auth_oidc_sid.
+        $table = new xmldb_table('auth_oidc_sid');
+        $field = new xmldb_field('sessionid', XMLDB_TYPE_CHAR, '128', null, null, null, null, 'timecreated');
+
+        // Conditionally launch add field sessionid.
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Define index sid to be added to auth_oidc_sid.
+        $index = new xmldb_index('sid', XMLDB_INDEX_NOTUNIQUE, ['sid']);
+
+        // Conditionally launch add index sid.
+        if (!$dbman->index_exists($table, $index)) {
+            $dbman->add_index($table, $index);
+        }
+
+        // Define field iss to be added to auth_oidc_sid.
+        $table = new xmldb_table('auth_oidc_sid');
+        $field = new xmldb_field('iss', XMLDB_TYPE_CHAR, '255', null, null, null, null, 'sessionid');
+
+        // Conditionally launch add field iss.
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Oidc savepoint reached.
+        upgrade_plugin_savepoint(true, 2026042000.06, 'auth', 'oidc');
+    }
+
+    if ($oldversion < 2026042000.08) {
+        \auth_oidc\utils::migrate_removed_icon_choices();
+        upgrade_plugin_savepoint(true, 2026042000.08, 'auth', 'oidc');
+    }
+
+    return true;
 }

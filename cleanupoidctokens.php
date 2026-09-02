@@ -56,6 +56,7 @@ uasort($tokenstoclean, function ($a, $b) {
 
 $deletetokenid = optional_param('id', 0, PARAM_INT);
 if ($deletetokenid) {
+    require_sesskey();
     if (array_key_exists($deletetokenid, $tokenstoclean)) {
         auth_oidc_delete_token($deletetokenid);
 
@@ -89,9 +90,9 @@ if ($tokenstoclean) {
     foreach ($tokenstoclean as $item) {
         $table->data[] = [
             $item->id,
-            $item->oidcusername,
-            $item->useridentifier,
-            $item->oidcuniqueid,
+            s($item->oidcusername),
+            s($item->useridentifier),
+            s($item->oidcuniqueid),
             $item->matchingstatus,
             $item->details,
             $item->action,

@@ -30,6 +30,9 @@ use auth_oidc\adminsetting\auth_oidc_admin_setting_endpoint;
 use auth_oidc\adminsetting\auth_oidc_admin_setting_iconselect;
 use auth_oidc\adminsetting\auth_oidc_admin_setting_loginflow;
 use auth_oidc\adminsetting\auth_oidc_admin_setting_redirecturi;
+use auth_oidc\adminsetting\auth_oidc_admin_setting_secretexpiryrecipients;
+use auth_oidc\adminsetting\auth_oidc_admin_setting_section_heading;
+use auth_oidc\adminsetting\auth_oidc_admin_setting_stateexpiry;
 use auth_oidc\utils;
 use core\url;
 
@@ -39,7 +42,7 @@ if ($hassiteconfig) {
     // Redirect the category overview page to the first settings tab, so that the Bootstrap
     // nav-tabs behave correctly instead of showing all sub-pages' content at once.
     if ($PAGE->has_set_url() && $PAGE->url->get_param('category') === 'oidcfolder') {
-        redirect(new \core\url('/admin/settings.php', ['section' => 'auth_oidc_application']));
+        redirect(new \core\url('/admin/settings.php', ['section' => 'authsettingoidc']));
     }
 
     // Add folder for OIDC settings.
@@ -47,8 +50,13 @@ if ($hassiteconfig) {
     $ADMIN->add('authsettings', $oidcfolder);
 
     // Application configuration settings page.
+    // Registered as 'authsettingoidc' (Moodle's "authsetting<authname>" convention for auth
+    // plugins) rather than a custom id, because the core "Manage authentication" page
+    // (admin_setting_manageauths::output_html in lib/adminlib.php) hardcodes the settings
+    // link for each auth plugin to section "authsetting<authname>". Using any other id here
+    // leaves that link pointing at a non-existent section and triggers a "section error".
     $applicationsettings = new admin_settingpage(
-        'auth_oidc_application',
+        'authsettingoidc',
         get_string('settings_page_application', 'auth_oidc')
     );
 
@@ -56,7 +64,7 @@ if ($hassiteconfig) {
     $applicationsettings->add(new admin_setting_heading(
         'auth_oidc_application_nav',
         '',
-        auth_oidc_get_settings_nav_html('auth_oidc_application')
+        auth_oidc_get_settings_nav_html('authsettingoidc')
     ));
 
     // Link to the guided Application Configuration Wizard.
@@ -281,13 +289,13 @@ if ($hassiteconfig) {
 
     // Secret expiry notification (only when local_o365 is installed).
     if (auth_oidc_is_local_365_installed()) {
-        $applicationsettings->add(new admin_setting_heading(
+        $applicationsettings->add(new auth_oidc_admin_setting_section_heading(
             'auth_oidc/application_secretexpiry_heading',
             get_string('settings_section_secret_expiry_notification', 'auth_oidc'),
             ''
         ));
 
-        $applicationsettings->add(new admin_setting_configtext(
+        $applicationsettings->add(new auth_oidc_admin_setting_secretexpiryrecipients(
             'auth_oidc/secretexpiryrecipients',
             get_string('secretexpiryrecipients', 'auth_oidc'),
             get_string('secretexpiryrecipients_help', 'auth_oidc'),
@@ -380,6 +388,21 @@ if ($hassiteconfig) {
         );
         $applicationsettings->hide_if(
             'auth_oidc/secretexpiryrecipients',
+            'auth_oidc/idptype',
+            'eq',
+            AUTH_OIDC_IDP_TYPE_OTHER
+        );
+
+        // Hide the section heading too, so an empty section isn't shown when the only
+        // setting in it is hidden.
+        $applicationsettings->hide_if(
+            'auth_oidc/application_secretexpiry_heading',
+            'auth_oidc/clientauthmethod',
+            'neq',
+            AUTH_OIDC_AUTH_METHOD_SECRET
+        );
+        $applicationsettings->hide_if(
+            'auth_oidc/application_secretexpiry_heading',
             'auth_oidc/idptype',
             'eq',
             AUTH_OIDC_IDP_TYPE_OTHER
@@ -577,6 +600,60 @@ if ($hassiteconfig) {
         )
     );
 
+    // Login state error page heading.
+    $settings->add(
+        new admin_setting_heading(
+            'auth_oidc/stateredirect_heading',
+            get_string('heading_stateredirect', 'auth_oidc'),
+            get_string('heading_stateredirect_desc', 'auth_oidc')
+        )
+    );
+
+    // Login state expiry.
+    $settings->add(
+        new auth_oidc_admin_setting_stateexpiry(
+            'auth_oidc/stateexpiry',
+            get_string('cfg_stateexpiry_key', 'auth_oidc'),
+            get_string('cfg_stateexpiry_desc', 'auth_oidc'),
+            5,
+            PARAM_INT
+        )
+    );
+
+    // Enable friendly login state error page.
+    $settings->add(
+        new admin_setting_configcheckbox(
+            'auth_oidc/stateredirect_enabled',
+            get_string('cfg_stateredirect_enabled_key', 'auth_oidc'),
+            get_string('cfg_stateredirect_enabled_desc', 'auth_oidc'),
+            '0'
+        )
+    );
+
+    // Message to display on the friendly login state error page.
+    $settings->add(
+        new admin_setting_confightmleditor(
+            'auth_oidc/stateredirect_message',
+            get_string('cfg_stateredirect_message_key', 'auth_oidc'),
+            get_string('cfg_stateredirect_message_desc', 'auth_oidc'),
+            get_string('cfg_stateredirect_message_default', 'auth_oidc')
+        )
+    );
+
+    // Redirect delay for the friendly login state error page.
+    $settings->add(
+        new admin_setting_configtext(
+            'auth_oidc/stateredirect_delay',
+            get_string('cfg_stateredirect_delay_key', 'auth_oidc'),
+            get_string('cfg_stateredirect_delay_desc', 'auth_oidc'),
+            5,
+            PARAM_INT
+        )
+    );
+
+    $settings->hide_if('auth_oidc/stateredirect_message', 'auth_oidc/stateredirect_enabled', 'notchecked');
+    $settings->hide_if('auth_oidc/stateredirect_delay', 'auth_oidc/stateredirect_enabled', 'notchecked');
+
     // User restrictions heading.
     $settings->add(
         new admin_setting_heading(
@@ -679,79 +756,24 @@ if ($hassiteconfig) {
     // Icon.
     $icons = [
         [
-            'pix' => 'o365',
+            'pix' => 'microsoft_365',
+            'alt' => new lang_string('cfg_iconalt_microsoft365', 'auth_oidc'),
+            'component' => 'auth_oidc',
+        ],
+        [
+            'pix' => 'office_365',
             'alt' => new lang_string('cfg_iconalt_o365', 'auth_oidc'),
             'component' => 'auth_oidc',
         ],
         [
-            'pix' => 't/locked',
-            'alt' => new lang_string('cfg_iconalt_locked', 'auth_oidc'),
-            'component' => 'moodle',
+            'pix' => 'openid',
+            'alt' => new lang_string('cfg_iconalt_openid', 'auth_oidc'),
+            'component' => 'auth_oidc',
         ],
         [
-            'pix' => 't/lock',
-            'alt' => new lang_string('cfg_iconalt_lock', 'auth_oidc'),
-            'component' => 'moodle',
-        ],
-        [
-            'pix' => 't/go',
-            'alt' => new lang_string('cfg_iconalt_go', 'auth_oidc'),
-            'component' => 'moodle',
-        ],
-        [
-            'pix' => 't/stop',
-            'alt' => new lang_string('cfg_iconalt_stop', 'auth_oidc'),
-            'component' => 'moodle',
-        ],
-        [
-            'pix' => 't/user',
-            'alt' => new lang_string('cfg_iconalt_user', 'auth_oidc'),
-            'component' => 'moodle',
-        ],
-        [
-            'pix' => 'u/user35',
-            'alt' => new lang_string('cfg_iconalt_user2', 'auth_oidc'),
-            'component' => 'moodle',
-        ],
-        [
-            'pix' => 'i/permissions',
-            'alt' => new lang_string('cfg_iconalt_key', 'auth_oidc'),
-            'component' => 'moodle',
-        ],
-        [
-            'pix' => 'i/cohort',
-            'alt' => new lang_string('cfg_iconalt_group', 'auth_oidc'),
-            'component' => 'moodle',
-        ],
-        [
-            'pix' => 'i/groups',
-            'alt' => new lang_string('cfg_iconalt_group2', 'auth_oidc'),
-            'component' => 'moodle',
-        ],
-        [
-            'pix' => 'i/mnethost',
-            'alt' => new lang_string('cfg_iconalt_mnet', 'auth_oidc'),
-            'component' => 'moodle',
-        ],
-        [
-            'pix' => 'i/permissionlock',
-            'alt' => new lang_string('cfg_iconalt_userlock', 'auth_oidc'),
-            'component' => 'moodle',
-        ],
-        [
-            'pix' => 't/more',
-            'alt' => new lang_string('cfg_iconalt_plus', 'auth_oidc'),
-            'component' => 'moodle',
-        ],
-        [
-            'pix' => 't/approve',
-            'alt' => new lang_string('cfg_iconalt_check', 'auth_oidc'),
-            'component' => 'moodle',
-        ],
-        [
-            'pix' => 't/right',
-            'alt' => new lang_string('cfg_iconalt_rightarrow', 'auth_oidc'),
-            'component' => 'moodle',
+            'pix' => 'keycloak',
+            'alt' => new lang_string('cfg_iconalt_keycloak', 'auth_oidc'),
+            'component' => 'auth_oidc',
         ],
     ];
     $settings->add(
@@ -759,7 +781,7 @@ if ($hassiteconfig) {
             'auth_oidc/icon',
             get_string('cfg_icon_key', 'auth_oidc'),
             get_string('cfg_icon_desc', 'auth_oidc'),
-            'auth_oidc:o365',
+            'auth_oidc:microsoft_365',
             $icons
         )
     );
@@ -773,7 +795,13 @@ if ($hassiteconfig) {
         get_string('cfg_customicon_desc', 'auth_oidc'),
         'customicon',
         0,
-        ['accepted_types' => ['.png', '.jpg', '.ico'], 'maxbytes' => get_max_upload_file_size()]
+        [
+            'accepted_types' => array_map(
+                fn ($extension) => ".{$extension}",
+                AUTH_OIDC_CUSTOMICON_ALLOWED_EXTENSIONS
+            ),
+            'maxbytes' => get_max_upload_file_size(),
+        ]
     );
     $customiconsetting->set_updatedcallback('auth_oidc_initialize_customicon');
     $settings->add($customiconsetting);

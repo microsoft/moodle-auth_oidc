@@ -31,13 +31,14 @@ use auth_oidc\event\user_created;
 use auth_oidc\event\user_rename_attempt;
 use auth_oidc\jwt;
 use auth_oidc\utils;
+use core\context\system;
 use core\output\notification;
 use core_text;
 use core_user;
 use moodle_exception;
 use core\url;
-use pix_icon;
 use stdClass;
+use core\di;
 
 defined('MOODLE_INTERNAL') || die();
 
@@ -59,25 +60,27 @@ class authcode extends base {
             return [];
         }
         $showicon = isset($this->config->set_pix) ? $this->config->set_pix : true;
+        $name = strip_tags(format_text($this->config->opname));
         $idpentry = [
             'url' => new url('/auth/oidc/', ['source' => 'loginpage']),
-            'name' => strip_tags(format_text($this->config->opname)),
+            'name' => $name,
         ];
         if ($showicon) {
+            global $OUTPUT;
             if (!empty($this->config->customicon)) {
-                $iconvalue = new pix_icon('0/customicon', get_string('pluginname', 'auth_oidc'), 'auth_oidc');
+                $idpentry['iconurl'] = $OUTPUT->image_url('0/customicon', 'auth_oidc')->out(false);
             } else {
-                $icon = (!empty($this->config->icon)) ? $this->config->icon : 'auth_oidc:o365';
+                $icon = (!empty($this->config->icon)) ? $this->config->icon : 'auth_oidc:microsoft_365';
                 $icon = explode(':', $icon);
                 if (isset($icon[1])) {
                     [$iconcomponent, $iconname] = $icon;
                 } else {
                     $iconcomponent = 'auth_oidc';
-                    $iconname = 'o365';
+                    $iconname = 'microsoft_365';
                 }
-                $iconvalue = new pix_icon($iconname, get_string('pluginname', 'auth_oidc'), $iconcomponent);
+                $idpentry['iconurl'] = $OUTPUT->image_url($iconname, $iconcomponent)->out(false);
             }
-            $idpentry['icon'] = $iconvalue;
+            $idpentry['name'] = $name;
         }
         return [$idpentry];
     }
@@ -109,6 +112,13 @@ class authcode extends base {
 
         // Port must match if present.
         if (($wwwroot['port'] ?? null) !== ($checkurl['port'] ?? null)) {
+            return false;
+        }
+
+        // Path must start with the wwwroot path (handles subdirectory installs).
+        $wwwrootpath = rtrim($wwwroot['path'] ?? '', '/') . '/';
+        $checkpath = $checkurl['path'] ?? '/';
+        if (strpos($checkpath . '/', $wwwrootpath) !== 0) {
             return false;
         }
 
@@ -195,7 +205,7 @@ class authcode extends base {
             $this->handleauthresponse($requestparams);
         } else {
             if (isloggedin() && !isguestuser() && empty($justauth) && empty($promptaconsent)) {
-                if (isset($SESSION->wantsurl) && (strpos($SESSION->wantsurl, $CFG->wwwroot) === 0)) {
+                if (isset($SESSION->wantsurl) && $this->is_valid_local_url($SESSION->wantsurl)) {
                     $urltogo = $SESSION->wantsurl;
                     unset($SESSION->wantsurl);
                 } else {
@@ -264,6 +274,17 @@ class authcode extends base {
         array $extraparams = [],
         bool $selectaccount = false
     ) {
+        global $USER;
+
+        if (isloggedin() && !isguestuser()) {
+            // Record who initiated this request against the state record. The OIDC callback can arrive as a
+            // cross-site POST (response_mode=form_post), which a SameSite=Lax session cookie is not sent on, so the
+            // session may not survive the round trip. Storing the user id here lets handleauthresponse() identify
+            // the initiating user from the (unguessable, single-use) state record instead of the live session.
+            $stateparams['initiatinguserid'] = $USER->id;
+        }
+
+        $this->set_csrf_cookie();
         $client = $this->get_oidcclient();
         $client->authrequest($promptlogin, $stateparams, $extraparams, $selectaccount);
     }
@@ -276,8 +297,123 @@ class authcode extends base {
      * @return void
      */
     public function initiateadminconsentrequest(array $stateparams = [], array $extraparams = []) {
+        global $USER;
+
+        if (!isset($stateparams['initiatinguserid']) && isloggedin() && !isguestuser()) {
+            $stateparams['initiatinguserid'] = $USER->id;
+        }
+
+        $this->set_csrf_cookie();
         $client = $this->get_oidcclient();
         $client->adminconsentrequest($stateparams, $extraparams);
+    }
+
+    /**
+     * Handle a login state that could not be matched to a stored state record.
+     *
+     * This normally happens when the user takes longer than the state record's lifetime to
+     * complete login at the identity provider (for example, while approving a multi-factor
+     * authentication prompt), so the scheduled cleanup task has already deleted the record by
+     * the time the identity provider redirects back. When the "stateredirect_enabled" setting is
+     * on, this shows a customizable, friendly message and automatically redirects the user back
+     * to the login page instead of surfacing the generic Moodle error page.
+     *
+     * @return never
+     * @throws moodle_exception If the friendly redirect setting is disabled.
+     */
+    protected function handlemissingstaterecord(): never {
+        global $OUTPUT, $PAGE;
+
+        if (empty(get_config('auth_oidc', 'stateredirect_enabled'))) {
+            throw new moodle_exception('errorauthunknownstate', 'auth_oidc');
+        }
+
+        $PAGE->set_url('/auth/oidc/');
+        $PAGE->set_context(system::instance());
+        $PAGE->set_pagelayout('redirect');
+        $PAGE->set_title(get_string('pageshouldredirect'));
+
+        $message = get_config('auth_oidc', 'stateredirect_message');
+        if (empty($message)) {
+            $message = get_string('errorauthunknownstate', 'auth_oidc');
+        }
+        $message = format_text($message, FORMAT_HTML, ['context' => system::instance()]);
+
+        $delay = (int) get_config('auth_oidc', 'stateredirect_delay');
+        if ($delay < 0) {
+            $delay = 0;
+        }
+
+        $url = new url('/login/index.php');
+
+        echo $OUTPUT->redirect_message($url->out(), $message, $delay, false, notification::NOTIFY_ERROR);
+        exit;
+    }
+
+    /**
+     * Set a dedicated CSRF cookie (SameSite=None; Secure) before redirecting to the IdP.
+     *
+     * The main session cookie carries SameSite=Lax (MDL-83526), which browsers drop on
+     * cross-site form_post callbacks, so a separate cookie is required to carry the sesskey.
+     */
+    protected function set_csrf_cookie(): void {
+        global $CFG;
+        // Always attempt to set the cookie with the Secure flag: browsers on plain HTTP will
+        // simply refuse to store it (safe no-op), while HTTPS terminated by a reverse proxy that
+        // Moodle isn't aware of (missing $CFG->sslproxy) will still honour it correctly.
+        $cookiepath = parse_url($CFG->wwwroot, PHP_URL_PATH) ?: '/';
+        setcookie('auth_oidc_csrf', sesskey(), [
+            'expires' => time() + 5 * MINSECS,
+            'path' => $cookiepath,
+            'secure' => true,
+            'httponly' => true,
+            'samesite' => 'None',
+        ]);
+    }
+
+    /**
+     * Clear the CSRF cookie set by set_csrf_cookie().
+     *
+     * Public so that \auth_oidc\observers::handle_user_loggedout() can clear a stale cookie
+     * when a user logs out while an OIDC request is still pending.
+     */
+    public function clear_csrf_cookie(): void {
+        global $CFG;
+        setcookie('auth_oidc_csrf', '', [
+            'expires' => time() - HOURSECS,
+            'path' => parse_url($CFG->wwwroot, PHP_URL_PATH) ?: '/',
+            'secure' => true,
+            'httponly' => true,
+            'samesite' => 'None',
+        ]);
+    }
+
+    /**
+     * Verify the state record's sesskey against the CSRF cookie, falling back to the current
+     * session's sesskey when the cookie is absent. Always clears the cookie and, on failure,
+     * deletes the state record.
+     *
+     * @param stdClass $staterec
+     * @throws moodle_exception if the CSRF check fails.
+     */
+    protected function verify_csrf_cookie(stdClass $staterec): void {
+        global $DB;
+
+        $csrfcookie = $_COOKIE['auth_oidc_csrf'] ?? null;
+        $csrftoken = (is_string($csrfcookie) && $csrfcookie !== '') ? $csrfcookie : sesskey();
+        $valid = hash_equals((string) $staterec->sesskey, (string) $csrftoken);
+
+        $this->clear_csrf_cookie();
+
+        if (!$valid) {
+            $DB->delete_records('auth_oidc_state', ['id' => $staterec->id]);
+            utils::debug(
+                $csrfcookie === null ? 'CSRF cookie missing on OIDC callback.' : 'CSRF cookie mismatch on OIDC callback.',
+                __METHOD__,
+                ['staterecid' => $staterec->id]
+            );
+            throw new moodle_exception('errorauthunknownstate', 'auth_oidc');
+        }
     }
 
     /**
@@ -297,13 +433,18 @@ class authcode extends base {
 
         if (!isset($authparams['state'])) {
             utils::debug('No state received.', __METHOD__, $authparams);
-            throw new moodle_exception('errorauthunknownstate', 'auth_oidc');
+            $this->handlemissingstaterecord();
         }
 
         // Validate and expire state.
         $staterec = $DB->get_record('auth_oidc_state', ['state' => $authparams['state']]);
         if (empty($staterec)) {
-            throw new moodle_exception('errorauthunknownstate', 'auth_oidc');
+            $this->handlemissingstaterecord();
+        }
+
+        $csrfverified = is_https() || !empty($CFG->sslproxy) || !empty($_COOKIE['auth_oidc_csrf']);
+        if ($csrfverified) {
+            $this->verify_csrf_cookie($staterec);
         }
 
         $orignonce = $staterec->nonce;
@@ -317,9 +458,33 @@ class authcode extends base {
         $SESSION->stateadditionaldata = $additionaldata;
         $DB->delete_records('auth_oidc_state', ['id' => $staterec->id]);
 
-        // Get token.
+        // Re-associate the browser session with the admin who initiated the consent request before doing
+        // anything that might fail below, so a failure in the auto-detection step (see below) does not leave
+        // the admin looking logged out on the resulting page.
+        if ($csrfverified && !empty($additionaldata['initiatinguserid'])) {
+            $initiatinguser = core_user::get_user((int) $additionaldata['initiatinguserid']);
+            if (
+                $initiatinguser && empty($initiatinguser->deleted) &&
+                (!isloggedin() || isguestuser())
+            ) {
+                \core\session\manager::login_user($initiatinguser);
+            }
+        }
+
+        // Get token. This app-only token is only used to auto-detect the Microsoft Entra tenant and OneDrive for
+        // Business URL settings below; admin consent itself has already been granted by Microsoft Entra by this
+        // point. Conditional Access policies can block this specific app-only token request (AADSTS53003) even
+        // though consent succeeded, and the tenant/URL can still be auto-detected via other Graph API calls, so
+        // that failure is not fatal and is silently redirected past.
         $client = $this->get_oidcclient();
-        $tokenparams = $client->app_access_token_request();
+        try {
+            $tokenparams = $client->app_access_token_request();
+        } catch (moodle_exception $e) {
+            if ($e->errorcode === 'settings_adminconsent_error_53003' && $e->module === 'local_o365') {
+                redirect($e->link);
+            }
+            throw $e;
+        }
         if (!isset($tokenparams['access_token'])) {
             throw new moodle_exception('errorauthnoaccesstoken', 'auth_oidc');
         }
@@ -360,13 +525,18 @@ class authcode extends base {
 
         if (!isset($authparams['state'])) {
             utils::debug('No state received.', __METHOD__, $authparams);
-            throw new moodle_exception('errorauthunknownstate', 'auth_oidc');
+            $this->handlemissingstaterecord();
         }
 
         // Validate and expire state.
         $staterec = $DB->get_record('auth_oidc_state', ['state' => $authparams['state']]);
         if (empty($staterec)) {
-            throw new moodle_exception('errorauthunknownstate', 'auth_oidc');
+            $this->handlemissingstaterecord();
+        }
+
+        $csrfverified = is_https() || !empty($CFG->sslproxy) || !empty($_COOKIE['auth_oidc_csrf']);
+        if ($csrfverified) {
+            $this->verify_csrf_cookie($staterec);
         }
 
         $orignonce = $staterec->nonce;
@@ -409,13 +579,49 @@ class authcode extends base {
             ];
             $event = user_authed::create($eventdata);
             $event->trigger();
+
+            if ($csrfverified && !empty($additionaldata['initiatinguserid'])) {
+                $initiatinguser = core_user::get_user((int) $additionaldata['initiatinguserid']);
+                if (
+                    $initiatinguser && empty($initiatinguser->deleted) &&
+                    (!isloggedin() || isguestuser())
+                ) {
+                    \core\session\manager::login_user($initiatinguser);
+                }
+            }
+
+            if (!empty($additionaldata['redirect'])) {
+                redirect(new url($additionaldata['redirect']));
+            }
+
             return true;
         }
 
         // Check if OIDC user is already migrated.
         $tokenrec = $DB->get_record('auth_oidc_token', ['oidcuniqid' => $oidcuniqid]);
-        if (isloggedin() && !isguestuser() && (empty($tokenrec) || (isset($USER->auth) && $USER->auth !== 'oidc'))) {
-            // If user is already logged in and trying to link Microsoft 365 account or use it for OIDC.
+
+        // Determine who initiated this request. Prefer the user id stored against the state record over the live
+        // session: the state record is only returned by a legitimate, single-use round trip through the OP, so it
+        // can be trusted even when the session cookie did not survive the callback (e.g. SameSite=Lax blocking the
+        // cross-site POST used by response_mode=form_post). Fall back to the live session for state records created
+        // before this was captured.
+        $linkinguser = null;
+        if (!empty($additionaldata['initiatinguserid'])) {
+            $linkinguser = core_user::get_user((int)$additionaldata['initiatinguserid']);
+            if (!$linkinguser || !empty($linkinguser->deleted)) {
+                $linkinguser = null;
+            }
+        } else if (isloggedin() && !isguestuser()) {
+            $linkinguser = $USER;
+        }
+
+        if ($linkinguser && (empty($tokenrec) || (isset($linkinguser->auth) && $linkinguser->auth !== 'oidc'))) {
+            // If the initiating user is trying to link a Microsoft 365 account or use it for OIDC, make sure the
+            // current session actually belongs to them, restoring it if the cookie was dropped on the callback.
+            if (!isloggedin() || isguestuser() || (int)$USER->id !== (int)$linkinguser->id) {
+                \core\session\manager::login_user($linkinguser);
+            }
+
             // Check if that Microsoft 365 account already exists in moodle.
             $oidcusername = $this->get_oidc_username_from_token_claim($idtoken);
 
@@ -466,6 +672,12 @@ class authcode extends base {
                 $authoidsidrecord->userid = $USER->id;
                 $authoidsidrecord->sid = $sid;
                 $authoidsidrecord->timecreated = time();
+                // Store the Moodle session id so logout.php can terminate the correct session directly,
+                // without depending on the MoodleSession cookie being present on the IdP's logout request.
+                $authoidsidrecord->sessionid = session_id();
+                // Store the issuer so logout.php can verify that a front-channel logout request naming
+                // this sid actually originates from the same IdP/tenant that issued it.
+                $authoidsidrecord->iss = $idtoken->claim('iss');
                 $DB->insert_record('auth_oidc_sid', $authoidsidrecord);
             }
             redirect(core_login_get_return_url());
@@ -574,7 +786,11 @@ class authcode extends base {
         global $DB;
 
         if (auth_oidc_is_local_365_installed()) {
-            $match = $DB->get_record('local_o365_connections', ['entraidupn' => $entraidupn]);
+            $entraidupn = trim($entraidupn);
+            $sql = 'SELECT *
+                      FROM {local_o365_connections}
+                     WHERE ' . $DB->sql_equal('entraidupn', ':entraidupn', false);
+            $match = $DB->get_record_sql($sql, ['entraidupn' => $entraidupn]);
             if (!empty($match) && \local_o365\utils::is_o365_connected($match->muserid) !== true) {
                 return $DB->get_record('user', ['id' => $match->muserid]);
             }
@@ -739,6 +955,10 @@ class authcode extends base {
             $user = authenticate_user_login($username, '', true);
 
             if (!empty($user)) {
+                // Look for plugins that want to add extra checks before user login is completed.
+                $hook = new \auth_oidc\hook\before_login_completed($idtoken);
+                di::get(\core\hook\manager::class)->dispatch($hook);
+
                 complete_user_login($user);
             } else {
                 // There was a problem in authenticate_user_login.
@@ -809,6 +1029,10 @@ class authcode extends base {
             $user = authenticate_user_login($username, '', true);
 
             if (!empty($user)) {
+                // Look for plugins that want to add extra checks before user login is completed.
+                $hook = new \auth_oidc\hook\before_login_completed($idtoken);
+                di::get(\core\hook\manager::class)->dispatch($hook);
+
                 complete_user_login($user);
             } else {
                 // There was a problem in authenticate_user_login.
@@ -850,6 +1074,10 @@ class authcode extends base {
                     $matchedwith->entraidupn = $username;
                     throw new moodle_exception('errorusermatched', 'auth_oidc', null, $matchedwith);
                 }
+                // The matched Moodle user is already set to auth 'oidc': bind the login to that user's own
+                // username rather than the Microsoft-derived one, which may not match it (e.g. a manual match
+                // keyed on the full UPN while the Moodle username is only the UPN prefix).
+                $username = $matchedwith->username;
             }
             $username = trim(core_text::strtolower($username));
             $tokenrec = $this->createtoken($oidcuniqid, $username, $authparams, $tokenparams, $idtoken, 0, $originalupn);
@@ -895,6 +1123,11 @@ class authcode extends base {
                     $updatedtokenrec->userid = $user->id;
                     $DB->update_record('auth_oidc_token', $updatedtokenrec);
                 }
+
+                // Look for plugins that want to add extra checks before user login is completed.
+                $hook = new \auth_oidc\hook\before_login_completed($idtoken);
+                di::get(\core\hook\manager::class)->dispatch($hook);
+
                 complete_user_login($user);
             } else {
                 // There was a problem in authenticate_user_login. Clean up incomplete token record.

@@ -85,6 +85,17 @@ const AUTH_OIDC_AUTH_CERT_SOURCE_TEXT = 1;
 const AUTH_OIDC_AUTH_CERT_SOURCE_FILE = 2;
 
 /**
+ * File extensions accepted for the 'auth_oidc/customicon' upload setting.
+ *
+ * SVG is deliberately excluded: unlike the plugin's own bundled stock icons, this file is
+ * admin-uploaded and served as-is from dataroot, so allowing SVG here would let an admin
+ * upload active content (script/event handlers). Shared by the setting's file picker
+ * (settings.php) and the extension allow-list checked before copying the file into
+ * pix_plugins (auth_oidc_initialize_customicon()) so the two can't drift apart.
+ */
+const AUTH_OIDC_CUSTOMICON_ALLOWED_EXTENSIONS = ['png', 'jpg', 'gif'];
+
+/**
  * Callback invoked when application credentials or endpoint settings are updated.
  *
  * Clears cached application tokens and the setup verification result so that
@@ -133,6 +144,8 @@ function auth_oidc_reset_app_tokens($settingname) {
  * @return void
  */
 function auth_oidc_validate_auth_settings(string $settingname) {
+    auth_oidc_validate_binding_username_claim();
+
     $idptype = get_config('auth_oidc', 'idptype');
     $clientauthmethod = get_config('auth_oidc', 'clientauthmethod');
 
@@ -197,6 +210,27 @@ function auth_oidc_validate_auth_settings(string $settingname) {
 }
 
 /**
+ * Warn the admin if the stored "Custom" binding username claim is no longer supported for the
+ * currently configured IdP type and user sync setting.
+ *
+ * @return void
+ */
+function auth_oidc_validate_binding_username_claim() {
+    $idptype = get_config('auth_oidc', 'idptype');
+    if (empty($idptype) || get_config('auth_oidc', 'bindingusernameclaim') !== 'custom') {
+        return;
+    }
+
+    $mstypes = [AUTH_OIDC_IDP_TYPE_MICROSOFT_ENTRA_ID, AUTH_OIDC_IDP_TYPE_MICROSOFT_IDENTITY_PLATFORM];
+    if (in_array($idptype, $mstypes) && auth_oidc_is_local_365_installed() && auth_oidc_is_user_sync_enabled()) {
+        $bindingclaimurl = new url('/admin/settings.php', ['section' => 'auth_oidc_binding_username_claim']);
+        \core\notification::warning(
+            get_string('warning_binding_username_claim_custom_unsupported', 'auth_oidc', $bindingclaimurl->out())
+        );
+    }
+}
+
+/**
  * Initialize custom icon for OIDC authentication.
  *
  * This function sets up a custom icon for the OIDC plugin by creating necessary directories
@@ -227,7 +261,25 @@ function auth_oidc_initialize_customicon($filefullname) {
     }
 
     if (file_exists($CFG->dataroot . '/pix_plugins/auth/oidc/0')) {
-        $file->copy_content_to($CFG->dataroot . '/pix_plugins/auth/oidc/0/customicon.jpg');
+        // Remove any previously stored custom icon so a stale file with a different
+        // extension can't take priority when the theme resolves the icon image.
+        $oldiconfiles = glob($CFG->dataroot . '/pix_plugins/auth/oidc/0/customicon.*');
+        foreach ($oldiconfiles ?: [] as $oldiconfile) {
+            // A failed unlink (e.g. permissions, or the file already being gone) isn't fatal
+            // here: copy_content_to() below will still overwrite/create the current extension's
+            // file, so at worst a stale file of a different extension is left behind.
+            @unlink($oldiconfile);
+        }
+
+        $extension = strtolower(pathinfo($file->get_filename(), PATHINFO_EXTENSION));
+        if (!in_array($extension, AUTH_OIDC_CUSTOMICON_ALLOWED_EXTENSIONS, true)) {
+            // Unexpected/empty extension: don't create a weird or unvalidated file under
+            // pix_plugins. The stale files for previously-valid extensions were already
+            // removed above, so this leaves no custom icon in place.
+            return false;
+        }
+
+        $file->copy_content_to($CFG->dataroot . "/pix_plugins/auth/oidc/0/customicon.{$extension}");
         theme_reset_all_caches();
     }
 }
@@ -307,13 +359,13 @@ function auth_oidc_get_tokens_with_empty_ids() {
         $item = new stdClass();
         $item->id = $record->id;
         $item->oidcusername = $record->oidcusername;
-        $item->useriditifier = $record->useridentifier;
+        $item->useridentifier = $record->useridentifier;
         $item->moodleusername = $record->username;
         $item->userid = 0;
         $item->oidcuniqueid = $record->oidcuniqid;
         $item->matchingstatus = get_string('unmatched', 'auth_oidc');
         $item->details = get_string('na', 'auth_oidc');
-        $deletetokenurl = new url('/auth/oidc/cleanupoidctokens.php', ['id' => $record->id]);
+        $deletetokenurl = new url('/auth/oidc/cleanupoidctokens.php', ['id' => $record->id, 'sesskey' => sesskey()]);
         $item->action = html_writer::link($deletetokenurl, get_string('delete_token', 'auth_oidc'));
 
         $emptyuseridtokens[$record->id] = $item;
@@ -350,9 +402,9 @@ function auth_oidc_get_tokens_with_mismatched_usernames() {
         $item->details = get_string(
             'mismatched_details',
             'auth_oidc',
-            ['tokenusername' => $record->tokenusername, 'moodleusername' => $record->musername]
+            ['tokenusername' => s($record->tokenusername), 'moodleusername' => s($record->musername)]
         );
-        $deletetokenurl = new url('/auth/oidc/cleanupoidctokens.php', ['id' => $record->id]);
+        $deletetokenurl = new url('/auth/oidc/cleanupoidctokens.php', ['id' => $record->id, 'sesskey' => sesskey()]);
         $item->action = html_writer::link($deletetokenurl, get_string('delete_token_and_reference', 'auth_oidc'));
 
         $mismatchedtokens[$record->id] = $item;
@@ -1042,6 +1094,32 @@ function auth_oidc_mask_secret($secret) {
 }
 
 /**
+ * Validate the "secret expiry notification recipients" setting value.
+ *
+ * The value is a comma-separated list of email addresses that the local_o365 notifysecretexpiry
+ * task sends notifications to. Empty entries and surrounding whitespace are ignored, and an empty
+ * list is valid (notifications then fall back to the site administrator). Only the syntax of each
+ * address is checked; the domain is not resolved.
+ *
+ * @param string $value The raw setting value.
+ * @return array List of entries that are not valid email addresses. Empty when every entry is valid.
+ */
+function auth_oidc_validate_secret_expiry_recipients(string $value): array {
+    $invalidemails = [];
+    foreach (explode(',', $value) as $email) {
+        $email = trim($email);
+        if ($email === '') {
+            continue;
+        }
+        if (!validate_email($email)) {
+            $invalidemails[] = $email;
+        }
+    }
+
+    return $invalidemails;
+}
+
+/**
  * Check if a value appears to be a masked secret.
  *
  * @param string $value The value to check
@@ -1066,7 +1144,7 @@ function auth_oidc_is_masked_secret($value) {
  */
 function auth_oidc_get_settings_nav_html(string $currentpage): string {
     $pages = [
-        'auth_oidc_application' => get_string('settings_page_application', 'auth_oidc'),
+        'authsettingoidc' => get_string('settings_page_application', 'auth_oidc'),
     ];
 
     // Only include the binding username claim tab if IdP type is configured.
