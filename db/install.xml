@@ -59,6 +59,7 @@
         <INDEX NAME="userid" UNIQUE="false" FIELDS="userid"/>
         <INDEX NAME="username" UNIQUE="false" FIELDS="username"/>
         <INDEX NAME="oidcusername" UNIQUE="false" FIELDS="oidcusername"/>
+        <INDEX NAME="authoidctoken_uniq_ix" UNIQUE="true" FIELDS="oidcuniqid, tokenresource"/>
       </INDEXES>
     </TABLE>
     <TABLE NAME="auth_oidc_sid" COMMENT="Stores sid from IdP, to be used to find connected Moodle users when SLO is triggered from IdP.">
