@@ -62,6 +62,38 @@ const AUTH_OIDC_MICROSOFT_ENDPOINT_VERSION_1 = 1;
  */
 const AUTH_OIDC_MICROSOFT_ENDPOINT_VERSION_2 = 2;
 
+// Microsoft cloud.
+/**
+ * Global Microsoft cloud.
+ */
+const AUTH_OIDC_MICROSOFT_CLOUD_GLOBAL = 1;
+
+/**
+ * Microsoft cloud in China operated by 21Vianet.
+ */
+const AUTH_OIDC_MICROSOFT_CLOUD_CHINA = 2;
+
+// Microsoft cloud endpoints.
+/**
+ * Base URL of the Microsoft Entra sign-in service.
+ */
+const AUTH_OIDC_MICROSOFT_LOGIN_URL = 'https://login.microsoftonline.com';
+
+/**
+ * Base URL of the Microsoft Entra sign-in service in China operated by 21Vianet.
+ */
+const AUTH_OIDC_MICROSOFT_LOGIN_URL_CHINA = 'https://login.partner.microsoftonline.cn';
+
+/**
+ * Microsoft Graph resource URL.
+ */
+const AUTH_OIDC_MICROSOFT_GRAPH_RESOURCE = 'https://graph.microsoft.com';
+
+/**
+ * Microsoft Graph resource URL in China operated by 21Vianet.
+ */
+const AUTH_OIDC_MICROSOFT_GRAPH_RESOURCE_CHINA = 'https://microsoftgraph.chinacloudapi.cn';
+
 // OIDC application authentication method.
 /**
  * OIDC application authentication method using secret.
@@ -110,7 +142,7 @@ function auth_oidc_reset_app_tokens($settingname) {
     static $cachespurged = false;
     if (!$cachespurged) {
         unset_config('apptokens', 'local_o365');
-        unset_config('azuresetupresult', 'local_o365');
+        unset_config('verifysetupresult', 'local_o365');
         purge_all_caches();
         $cachespurged = true;
     }
@@ -276,6 +308,9 @@ function auth_oidc_initialize_customicon($filefullname) {
             // Unexpected/empty extension: don't create a weird or unvalidated file under
             // pix_plugins. The stale files for previously-valid extensions were already
             // removed above, so this leaves no custom icon in place.
+            debugging('auth_oidc: custom icon "' . $file->get_filename() . '" has unsupported extension "' . $extension .
+                '" and will not be shown on the login page. Supported extensions: ' .
+                implode(', ', AUTH_OIDC_CUSTOMICON_ALLOWED_EXTENSIONS) . '.', DEBUG_DEVELOPER);
             return false;
         }
 
@@ -328,6 +363,27 @@ function auth_oidc_connectioncapability($userid, $mode = 'connect', $require = f
 }
 
 /**
+ * Determine whether a field mapping's "update local" behaviour applies to an event.
+ *
+ * Event types are 'create' (user being created, on login or by user sync), 'login' (existing user logging in) and 'usersync'
+ * (existing user updated by the user sync task).
+ *
+ * @param string $behavior The field mapping's update_local value: 'always', 'oncreate', 'onlogin' or 'oncreate_usersync'.
+ * @param string $eventtype 'create', 'login' or 'usersync'.
+ * @return bool
+ */
+function auth_oidc_fieldmap_applies_to_event(string $behavior, string $eventtype): bool {
+    $behaviorevents = [
+        'always' => ['create', 'login', 'usersync'],
+        'oncreate' => ['create'],
+        'onlogin' => ['login', 'usersync'],
+        'oncreate_usersync' => ['create', 'usersync'],
+    ];
+
+    return isset($behaviorevents[$behavior]) && in_array($eventtype, $behaviorevents[$behavior], true);
+}
+
+/**
  * Determine if local_o365 plugins is installed.
  *
  * @return bool
@@ -341,6 +397,40 @@ function auth_oidc_is_local_365_installed() {
         $DB->record_exists('config_plugins', ['plugin' => 'local_o365', 'name' => 'version']) &&
         $dbmanager->table_exists('local_o365_objects') &&
         $dbmanager->table_exists('local_o365_connections');
+}
+
+/**
+ * Determine whether the Microsoft cloud in China operated by 21Vianet is used.
+ *
+ * The Microsoft cloud setting only applies to the Microsoft IdP types.
+ *
+ * @return bool
+ */
+function auth_oidc_use_chinese_api(): bool {
+    $idptype = (int) get_config('auth_oidc', 'idptype');
+    if (!in_array($idptype, [AUTH_OIDC_IDP_TYPE_MICROSOFT_ENTRA_ID, AUTH_OIDC_IDP_TYPE_MICROSOFT_IDENTITY_PLATFORM])) {
+        return false;
+    }
+
+    return (int) get_config('auth_oidc', 'microsoftcloud') === AUTH_OIDC_MICROSOFT_CLOUD_CHINA;
+}
+
+/**
+ * Return the base URL of the Microsoft Entra sign-in service of the Microsoft cloud in use.
+ *
+ * @return string
+ */
+function auth_oidc_get_login_baseurl(): string {
+    return auth_oidc_use_chinese_api() ? AUTH_OIDC_MICROSOFT_LOGIN_URL_CHINA : AUTH_OIDC_MICROSOFT_LOGIN_URL;
+}
+
+/**
+ * Return the Microsoft Graph resource URL of the Microsoft cloud in use.
+ *
+ * @return string
+ */
+function auth_oidc_get_graph_resource(): string {
+    return auth_oidc_use_chinese_api() ? AUTH_OIDC_MICROSOFT_GRAPH_RESOURCE_CHINA : AUTH_OIDC_MICROSOFT_GRAPH_RESOURCE;
 }
 
 /**
@@ -453,6 +543,138 @@ function auth_oidc_delete_token(int $tokenid): void {
 }
 
 /**
+ * Get the number of users having tokens stored in the auth_oidc_token table.
+ *
+ * @param array|null $userids IDs of the Moodle users to count, or null to count all users with tokens.
+ * @return int The number of users having tokens.
+ */
+function auth_oidc_count_users_with_tokens(?array $userids = null): int {
+    global $DB;
+
+    $where = 'userid <> 0';
+    $params = [];
+    if ($userids !== null) {
+        if (empty($userids)) {
+            return 0;
+        }
+        [$insql, $params] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED);
+        $where .= " AND userid $insql";
+    }
+
+    return $DB->count_records_sql("SELECT COUNT(DISTINCT userid) FROM {auth_oidc_token} WHERE $where", $params);
+}
+
+/**
+ * Clear the stored tokens of users.
+ *
+ * Deletes the records in the auth_oidc_token table, and the matching records in the local_o365_token table if
+ * local_o365 is installed. The user's link to the Microsoft 365 account (local_o365_objects and
+ * local_o365_connections records) is kept, so users will get new tokens the next time they log in using
+ * OpenID Connect, or connect to Microsoft 365.
+ *
+ * Token records not matched to a Moodle user (with a user ID of 0) are never deleted, they are left to the
+ * cleanup OpenID Connect tokens tool.
+ *
+ * @param array|null $userids IDs of the Moodle users to clear the tokens of, or null to clear the tokens of all users.
+ * @return int The number of auth_oidc_token records deleted.
+ */
+function auth_oidc_clear_user_tokens(?array $userids = null): int {
+    global $DB;
+
+    if ($userids === null) {
+        $count = $DB->count_records_select('auth_oidc_token', 'userid <> 0');
+        $DB->delete_records_select('auth_oidc_token', 'userid <> 0');
+        if (auth_oidc_is_local_365_installed()) {
+            $DB->delete_records('local_o365_token');
+        }
+
+        return $count;
+    }
+
+    $userids = array_filter($userids);
+    if (empty($userids)) {
+        return 0;
+    }
+
+    [$insql, $params] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED);
+    $count = $DB->count_records_select('auth_oidc_token', "userid $insql", $params);
+    $DB->delete_records_select('auth_oidc_token', "userid $insql", $params);
+    if (auth_oidc_is_local_365_installed()) {
+        $DB->delete_records_select('local_o365_token', "user_id $insql", $params);
+    }
+
+    return $count;
+}
+
+/**
+ * Get the list of reserved claim and field names that cannot be used as a custom claim name.
+ *
+ * A custom claim configured with one of these names would either silently do nothing (the name
+ * already carries a specific meaning in the token or in this plugin, so the intended value would
+ * never come through) or collide with an existing field mapping option. The list combines:
+ *  - Standard JWT (RFC 7519) and OpenID Connect Core registered claims, which any compliant
+ *    identity provider may issue with these specific meanings.
+ *  - Claims specific to Microsoft Entra ID (Azure AD) v1.0/v2.0 access and ID tokens.
+ *  - Claims specific to Keycloak access and ID tokens.
+ *  - Claim names this plugin's "Binding username claim" setting reads directly from the token.
+ *  - Remote field names this plugin already assigns a specific meaning to (see
+ *    auth_oidc_get_remote_fields()).
+ *
+ * @return array Lower-cased reserved claim and field names.
+ */
+function auth_oidc_get_reserved_custom_claim_names(): array {
+    // RFC 7519 JWT registered claims, and OpenID Connect Core standard claims.
+    $standardclaims = [
+        'iss', 'sub', 'aud', 'exp', 'nbf', 'iat', 'jti',
+        'name', 'given_name', 'family_name', 'middle_name', 'nickname', 'preferred_username',
+        'profile', 'picture', 'website', 'email', 'email_verified', 'gender', 'birthdate',
+        'zoneinfo', 'locale', 'phone_number', 'phone_number_verified', 'address', 'updated_at',
+        'auth_time', 'nonce', 'acr', 'amr', 'azp', 'at_hash', 'c_hash', 'sid',
+    ];
+
+    // Claims specific to Microsoft Entra ID (Azure AD) tokens. "roles" and "groups" are deliberately not listed: they
+    // can be configured as custom claims to read App roles and group IDs from the token, and are then exposed under a
+    // prefixed field mapping key (see auth_oidc_get_custom_claim_prefixed_key()) so they do not collide with the built-in
+    // "Roles" and "Groups" options.
+    $microsoftclaims = [
+        'aio', 'acrs', 'altsecid', 'appid', 'appidacr', 'azpacr', 'ctry', 'fwd', 'group',
+        'idp', 'idtyp', 'in_corp', 'ipaddr', 'login_hint', 'oid', 'onprem_sid', 'platf', 'puid',
+        'pwd_exp', 'pwd_url', 'rh', 'scp', 'tenant_ctry', 'tid', 'unique_name', 'upn',
+        'uti', 'ver', 'verified_primary_email', 'verified_secondary_email', 'vnet', 'wids',
+        'xms_cc', 'xms_edov', 'xms_pdl', 'xms_pl', 'xms_tpl',
+    ];
+
+    // Claims specific to Keycloak tokens (standard claims above cover most of the rest).
+    $keycloakclaims = ['typ', 'session_state', 'allowed-origins', 'realm_access', 'resource_access', 'scope'];
+
+    // Claim names this plugin's "Binding username claim" setting reads directly from the token
+    // (see loginflow\base::get_oidc_username_from_token_claim()); most of its options are already
+    // covered above, except this one, which is specific to on-premises Active Directory claim
+    // mapping (e.g. ADFS or an AD Connect-derived claim rule).
+    $bindingusernameclaims = ['samaccountname'];
+
+    // Remote field names this plugin already assigns a specific meaning to; see
+    // auth_oidc_get_remote_fields() and auth_oidc_get_email_remote_fields().
+    $pluginfields = [
+        'bindingusernameclaim', 'objectid', 'userprincipalname', 'displayname', 'givenname',
+        'surname', 'mail', 'onpremisessamaccountname', 'streetaddress', 'city', 'postalcode',
+        'state', 'country', 'jobtitle', 'department', 'companyname', 'preferredlanguage',
+        'employeeid', 'businessphones', 'faxnumber', 'mobilephone', 'officelocation',
+        'preferredname', 'manager', 'manager_email', 'teams', 'sds_school_id', 'sds_school_name',
+        'sds_school_role', 'sds_student_externalid', 'sds_student_birthdate', 'sds_student_grade',
+        'sds_student_graduationyear', 'sds_student_studentnumber', 'sds_teacher_externalid',
+        'sds_teacher_teachernumber',
+    ];
+    for ($i = 1; $i <= 15; $i++) {
+        $pluginfields[] = 'extensionattribute' . $i;
+    }
+
+    $reserved = array_merge($standardclaims, $microsoftclaims, $keycloakclaims, $bindingusernameclaims, $pluginfields);
+
+    return array_values(array_unique(array_map('strtolower', $reserved)));
+}
+
+/**
  * Get validated custom claim names from configuration.
  *
  * Parses the customclaims configuration, validates claim name format, and returns
@@ -470,6 +692,8 @@ function auth_oidc_get_validated_custom_claim_names() {
     $customclaims = array_filter(array_map('trim', explode(' ', $customclaimsconfig)));
     $customclaims = array_unique($customclaims);
 
+    $reserved = auth_oidc_get_reserved_custom_claim_names();
+
     $validated = [];
     foreach ($customclaims as $claimname) {
         // Validate claim name format (alphanumeric, underscore, hyphen only).
@@ -477,10 +701,54 @@ function auth_oidc_get_validated_custom_claim_names() {
             debugging("Invalid custom claim name skipped: $claimname", DEBUG_DEVELOPER);
             continue;
         }
+        if (in_array(strtolower($claimname), $reserved, true)) {
+            debugging("Reserved custom claim name skipped: $claimname", DEBUG_DEVELOPER);
+            continue;
+        }
         $validated[] = $claimname;
     }
 
     return $validated;
+}
+
+/**
+ * Get the key used for a custom claim in the user data array and in field mapping settings when its name
+ * collides with a built-in remote field (e.g. "roles" or "groups"), so it does not override the built-in field.
+ *
+ * @param string $claimname Custom claim name.
+ * @return string Prefixed field key for the claim.
+ */
+function auth_oidc_get_custom_claim_prefixed_key(string $claimname): string {
+    return 'claim:' . $claimname;
+}
+
+/**
+ * Check whether a field mapping key is a prefixed custom claim key.
+ *
+ * @param string $key Field mapping remote field key.
+ * @return bool True if the key was generated by {@see auth_oidc_get_custom_claim_prefixed_key()}.
+ */
+function auth_oidc_is_custom_claim_prefixed_key(string $key): bool {
+    return strpos($key, auth_oidc_get_custom_claim_prefixed_key('')) === 0;
+}
+
+/**
+ * Convert a token claim value to a string that can be stored in a user field.
+ *
+ * @param mixed $claimvalue Claim value from the token.
+ * @return string|null String value, or null if the claim is empty or not a scalar or a list of scalars.
+ */
+function auth_oidc_custom_claim_value_to_string($claimvalue): ?string {
+    if (is_array($claimvalue)) {
+        $claimvalue = array_filter($claimvalue, fn($value) => is_scalar($value) && $value !== '');
+        $claimvalue = $claimvalue ? implode(',', $claimvalue) : null;
+    }
+
+    if (!is_scalar($claimvalue) || $claimvalue === '') {
+        return null;
+    }
+
+    return (string) $claimvalue;
 }
 
 /**
@@ -496,9 +764,10 @@ function auth_oidc_process_custom_claims($remotefields) {
     $reserved = array_keys($remotefields);
 
     foreach ($customclaims as $claimname) {
-        // Prevent overriding existing fields.
         if (in_array($claimname, $reserved, true)) {
-            debugging("Reserved custom claim name skipped: $claimname", DEBUG_DEVELOPER);
+            // Expose claims colliding with a built-in field under a prefixed key.
+            $remotefields[auth_oidc_get_custom_claim_prefixed_key($claimname)] =
+                get_string('settings_fieldmap_field_tokenclaim', 'auth_oidc', $claimname);
             continue;
         }
 
@@ -535,6 +804,8 @@ function auth_oidc_get_remote_fields() {
             'companyName' => get_string('settings_fieldmap_field_companyName', 'auth_oidc'),
             'preferredLanguage' => get_string('settings_fieldmap_field_preferredLanguage', 'auth_oidc'),
             'employeeId' => get_string('settings_fieldmap_field_employeeId', 'auth_oidc'),
+            'employeeType' => get_string('settings_fieldmap_field_employeeType', 'auth_oidc'),
+            'accountEnabled' => get_string('settings_fieldmap_field_accountEnabled', 'auth_oidc'),
             'businessPhones' => get_string('settings_fieldmap_field_businessPhones', 'auth_oidc'),
             'faxNumber' => get_string('settings_fieldmap_field_faxNumber', 'auth_oidc'),
             'mobilePhone' => get_string('settings_fieldmap_field_mobilePhone', 'auth_oidc'),
@@ -668,6 +939,47 @@ function auth_oidc_get_field_mappings() {
 }
 
 /**
+ * Trim a field mapping value so it fits within the database column of the local user field it will be assigned to.
+ *
+ * Data received from Microsoft Entra ID (e.g. a long phone number with extensions) can exceed the length allowed
+ * by the Moodle database schema for the mapped field, which would otherwise cause the user creation or update to
+ * fail with a database write error. Values for fields that are not plain character columns of the 'user' table,
+ * such as custom profile fields, are returned unchanged.
+ *
+ * @param string $localfield The local user field the value will be assigned to.
+ * @param mixed $value The value to be trimmed.
+ * @return mixed The value, trimmed to the column length if necessary.
+ */
+function auth_oidc_trim_user_field_value($localfield, $value) {
+    global $DB;
+
+    static $usercolumns = null;
+
+    if (!is_string($value)) {
+        return $value;
+    }
+
+    if ($usercolumns === null) {
+        $usercolumns = $DB->get_columns('user');
+    }
+
+    if (!array_key_exists($localfield, $usercolumns)) {
+        return $value;
+    }
+
+    $column = $usercolumns[$localfield];
+    if ($column->meta_type !== 'C' || empty($column->max_length) || $column->max_length <= 0) {
+        return $value;
+    }
+
+    if (core_text::strlen($value) > $column->max_length) {
+        return core_text::substr($value, 0, $column->max_length);
+    }
+
+    return $value;
+}
+
+/**
  * Apply default email mapping settings.
  *
  * @return array
@@ -700,6 +1012,59 @@ function auth_oidc_apply_default_email_mapping() {
 }
 
 /**
+ * Determine whether the given user principal name is itself a usable email address.
+ *
+ * Some Microsoft Entra ID accounts have no 'mail' attribute (for example, cloud-only accounts without an
+ * Exchange Online mailbox, or on-premises accounts synced without a mail attribute set), but their UPN
+ * happens to be in email format and can be used as a stand-in.
+ *
+ * @param string|null $upn The user's user principal name.
+ * @return string|null The UPN, if it is a valid email address; otherwise null.
+ */
+function auth_oidc_upn_as_email(?string $upn): ?string {
+    if (empty($upn)) {
+        return null;
+    }
+
+    $email = filter_var($upn, FILTER_VALIDATE_EMAIL);
+
+    return !empty($email) ? $email : null;
+}
+
+/**
+ * Generate a placeholder email address for a Microsoft Entra ID user who has no usable email address, if the
+ * site is configured to do so.
+ *
+ * @param string|null $upn The user's user principal name, used to build the placeholder address when available.
+ * @param string|null $objectid The user's Entra ID object ID, used to build the placeholder address if no UPN
+ *                               is available.
+ * @return string|null The generated placeholder email address, or null if generation is disabled, not fully
+ *                      configured, or no usable identifier is available to build one from.
+ */
+function auth_oidc_generate_dummy_email(?string $upn, ?string $objectid = null): ?string {
+    if (empty(get_config('auth_oidc', 'generatedummyemail'))) {
+        return null;
+    }
+
+    $domain = trim((string) get_config('auth_oidc', 'dummyemaildomain'));
+    if (empty($domain)) {
+        return null;
+    }
+
+    $identifier = !empty($upn) ? $upn : $objectid;
+    if (empty($identifier)) {
+        return null;
+    }
+
+    $localpart = strtolower(preg_replace('/[^a-zA-Z0-9._-]/', '', $identifier));
+    if (empty($localpart)) {
+        return null;
+    }
+
+    return $localpart . '@' . $domain;
+}
+
+/**
  * Helper function used to print mapping and locking for auth_oidc plugin on admin pages.
  *
  * @param stdclass $settings Moodle admin settings instance
@@ -721,10 +1086,11 @@ function auth_oidc_display_auth_lock_options(
 ) {
     global $DB;
 
-    // Introductory explanation and help text.
+    // Introductory explanation and help text (no heading text, since the "Field mappings" tab title already
+    // identifies this page).
     if ($mapremotefields) {
         $settings->add(
-            new admin_setting_heading($auth . '/data_mapping', new lang_string('auth_data_mapping', 'auth'), $helptext)
+            new admin_setting_heading($auth . '/data_mapping', '', $helptext)
         );
     } else {
         $settings->add(
@@ -751,6 +1117,9 @@ function auth_oidc_display_auth_lock_options(
         'oncreate' => get_string('update_oncreate', 'auth'),
         'onlogin' => $onlogintext,
     ];
+    if (auth_oidc_is_local_365_installed()) {
+        $updatelocaloptions['oncreate_usersync'] = get_string('update_oncreate_and_usersync', 'auth_oidc');
+    }
 
     $updateextoptions = [
         '0' => get_string('update_never', 'auth'),
@@ -883,11 +1252,21 @@ function auth_oidc_get_all_user_fields() {
 function auth_oidc_determine_endpoint_version(string $endpoint) {
     $endpointversion = AUTH_OIDC_MICROSOFT_ENDPOINT_VERSION_UNKNOWN;
 
-    if (strpos($endpoint, 'https://login.microsoftonline.com/') === 0) {
-        if (strpos($endpoint, 'oauth2/v2.0/') !== false) {
-            $endpointversion = AUTH_OIDC_MICROSOFT_ENDPOINT_VERSION_2;
-        } else if (strpos($endpoint, 'oauth2') !== false) {
-            $endpointversion = AUTH_OIDC_MICROSOFT_ENDPOINT_VERSION_1;
+    // The sign-in service of the global Microsoft cloud, and of the one in China operated by 21Vianet (and its former host name).
+    $loginurls = [
+        AUTH_OIDC_MICROSOFT_LOGIN_URL . '/',
+        AUTH_OIDC_MICROSOFT_LOGIN_URL_CHINA . '/',
+        'https://login.chinacloudapi.cn/',
+    ];
+    foreach ($loginurls as $loginurl) {
+        if (strpos($endpoint, $loginurl) === 0) {
+            if (strpos($endpoint, 'oauth2/v2.0/') !== false) {
+                $endpointversion = AUTH_OIDC_MICROSOFT_ENDPOINT_VERSION_2;
+            } else if (strpos($endpoint, 'oauth2') !== false) {
+                $endpointversion = AUTH_OIDC_MICROSOFT_ENDPOINT_VERSION_1;
+            }
+
+            break;
         }
     }
 
@@ -1120,6 +1499,42 @@ function auth_oidc_validate_secret_expiry_recipients(string $value): array {
 }
 
 /**
+ * Validate the "custom claims" setting value.
+ *
+ * The value is a space-separated list of custom claim names to be read from the identity
+ * provider's ID token and made available in the field mapping list. Empty entries and
+ * surrounding whitespace are ignored, and an empty list is valid. Each remaining entry must
+ * contain only alphanumeric characters, hyphens, and underscores, and must not be a reserved
+ * claim or field name (see auth_oidc_get_reserved_custom_claim_names()) - for example a standard
+ * JWT/OpenID Connect claim, a Microsoft Entra ID or Keycloak specific claim, or an existing field
+ * mapping option. A reserved name would either never carry the intended value, or shadow an
+ * existing field mapping option.
+ *
+ * @param string $value The raw setting value.
+ * @return array List of entries that are not valid claim names. Empty when every entry is valid.
+ */
+function auth_oidc_validate_custom_claims(string $value): array {
+    $reserved = auth_oidc_get_reserved_custom_claim_names();
+
+    $invalidclaims = [];
+    foreach (explode(' ', $value) as $claim) {
+        $claim = trim($claim);
+        if ($claim === '') {
+            continue;
+        }
+        if (!preg_match('/^[a-zA-Z0-9_-]+$/', $claim)) {
+            $invalidclaims[] = $claim;
+            continue;
+        }
+        if (in_array(strtolower($claim), $reserved, true)) {
+            $invalidclaims[] = $claim;
+        }
+    }
+
+    return $invalidclaims;
+}
+
+/**
  * Check if a value appears to be a masked secret.
  *
  * @param string $value The value to check
@@ -1133,16 +1548,27 @@ function auth_oidc_is_masked_secret($value) {
 }
 
 /**
- * Build Bootstrap nav-tabs HTML for navigating between auth_oidc settings pages.
+ * Build the shared header HTML for auth_oidc configuration pages: the plugin-wide heading, the Bootstrap
+ * nav-tabs bar for navigating between auth_oidc settings pages, and the page-specific subtitle, plus a style
+ * tag hiding the surrounding Moodle breadcrumb and default page heading (which the plugin-wide heading and tab
+ * bar replace).
  *
- * Renders a row of tab links to each settings sub-page, with the current page
- * marked as active. The "Binding username claim" tab is only included if IdP type
- * is configured, since the corresponding settings page is only registered in that case.
+ * Renders a row of tab links to each settings sub-page, with the current page marked as active. The "Binding
+ * username claim" tab is only included if IdP type is configured, since the corresponding settings page is
+ * only registered in that case.
  *
  * @param string $currentpage Section ID of the currently active page.
- * @return string HTML for the navigation bar.
+ * @param string|null $subtitle Page-specific subtitle to print below the tab navigation, for a page nested
+ *     under a tab (e.g. the change binding username claim tool, under "Binding username claim"). The settings
+ *     pages that map 1:1 to a tab (IdP and authentication, Binding username claim, ...) already open with
+ *     their own heading, so they leave this null and print no subtitle here.
+ * @param string|null $intro Page-specific introductory HTML to print below the tab navigation (and above the
+ *     subtitle, if any), for a page that needs a lead-in paragraph rather than a title (e.g. the "IdP and
+ *     authentication" page's link to the guided Application Configuration Wizard). Printed unescaped, so the
+ *     caller must only pass trusted, already-safe markup (e.g. from a lang string).
+ * @return string HTML for the settings page header.
  */
-function auth_oidc_get_settings_nav_html(string $currentpage): string {
+function auth_oidc_get_settings_nav_html(string $currentpage, ?string $subtitle = null, ?string $intro = null): string {
     $pages = [
         'authsettingoidc' => get_string('settings_page_application', 'auth_oidc'),
     ];
@@ -1155,16 +1581,51 @@ function auth_oidc_get_settings_nav_html(string $currentpage): string {
 
     $pages += [
         'auth_oidc_other_settings' => get_string('settings_page_other_settings', 'auth_oidc'),
+        'auth_oidc_clear_user_tokens' => get_string('settings_page_clear_user_tokens', 'auth_oidc'),
         'auth_oidc_field_mapping' => get_string('settings_page_field_mapping', 'auth_oidc'),
     ];
 
-    $html = html_writer::start_tag('ul', ['class' => 'nav nav-tabs mb-3']);
+    // Tabs for admin_externalpage pages, which can't be opened through /admin/settings.php?section=.
+    $externalpageurls = [
+        'auth_oidc_clear_user_tokens' => new \core\url('/auth/oidc/clearusertokens.php'),
+    ];
+
+    // Hide the breadcrumb, Moodle's own page heading, and (on admin_settingpage forms) the settings form's own
+    // "<h2>{$a->title}</h2>", a direct child of .settingsform printed by admin/templates/settings.mustache before
+    // this nav html: the plugin-wide heading and tab bar below replace all of them.
+    $html = html_writer::tag('style', '#page-navbar, .page-context-header, .settingsform > h2 { display: none; }');
+    $pageheading = get_string('settings_pageheading', 'auth_oidc', get_string('pluginname', 'auth_oidc'));
+    $html .= html_writer::tag('h1', $pageheading);
+
+    $html .= html_writer::start_tag('ul', ['class' => 'nav nav-tabs mb-3']);
     foreach ($pages as $section => $label) {
-        $url = new \core\url('/admin/settings.php', ['section' => $section]);
+        $url = $externalpageurls[$section] ?? new \core\url('/admin/settings.php', ['section' => $section]);
         $linkattrs = ['class' => 'nav-link' . ($section === $currentpage ? ' active' : '')];
         $html .= html_writer::tag('li', html_writer::link($url, $label, $linkattrs), ['class' => 'nav-item']);
     }
     $html .= html_writer::end_tag('ul');
 
+    if ($intro !== null) {
+        $html .= html_writer::div($intro);
+    }
+
+    if ($subtitle !== null) {
+        $html .= html_writer::tag('h2', s($subtitle));
+    }
+
     return $html;
+}
+
+/**
+ * Build the HTML for the "advanced feature" warning shown on the binding username claim settings page.
+ *
+ * Uses the plugin's own .auth_oidc_warning style (see styles.css) rather than a core notification, since the
+ * settings page is an admin_settingpage (body class "path-admin-setting", not "path-admin-auth-oidc"), so the
+ * core "warning" notification style can't be scoped to it the way .warning_header is scoped to this plugin's
+ * admin_externalpage-based pages.
+ *
+ * @return string HTML for the warning box.
+ */
+function auth_oidc_get_binding_username_claim_warning_html(): string {
+    return html_writer::div(get_string('binding_username_claim_warning', 'auth_oidc'), 'auth_oidc_warning');
 }

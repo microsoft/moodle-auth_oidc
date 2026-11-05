@@ -26,9 +26,9 @@
 
 defined('MOODLE_INTERNAL') || die();
 
+use auth_oidc\adminsetting\auth_oidc_admin_setting_customclaims;
 use auth_oidc\adminsetting\auth_oidc_admin_setting_endpoint;
 use auth_oidc\adminsetting\auth_oidc_admin_setting_iconselect;
-use auth_oidc\adminsetting\auth_oidc_admin_setting_loginflow;
 use auth_oidc\adminsetting\auth_oidc_admin_setting_redirecturi;
 use auth_oidc\adminsetting\auth_oidc_admin_setting_secretexpiryrecipients;
 use auth_oidc\adminsetting\auth_oidc_admin_setting_section_heading;
@@ -60,19 +60,16 @@ if ($hassiteconfig) {
         get_string('settings_page_application', 'auth_oidc')
     );
 
-    // Add navigation tabs.
+    // Add navigation tabs, with an intro pointing to the guided Application Configuration Wizard.
+    $wizardurl = new url('/auth/oidc/manageapplication.php');
     $applicationsettings->add(new admin_setting_heading(
         'auth_oidc_application_nav',
         '',
-        auth_oidc_get_settings_nav_html('authsettingoidc')
-    ));
-
-    // Link to the guided Application Configuration Wizard.
-    $wizardurl = new url('/auth/oidc/manageapplication.php');
-    $applicationsettings->add(new admin_setting_description(
-        'auth_oidc/application_wizard_link',
-        '',
-        get_string('settings_application_wizard_desc', 'auth_oidc', $wizardurl->out())
+        auth_oidc_get_settings_nav_html(
+            'authsettingoidc',
+            null,
+            get_string('settings_application_wizard_desc', 'auth_oidc', $wizardurl->out())
+        )
     ));
 
     // Basic settings heading.
@@ -108,6 +105,22 @@ if ($hassiteconfig) {
     $idptypesetting->set_updatedcallback('auth_oidc_reset_app_tokens');
     $idptypesetting->set_updatedcallback('auth_oidc_validate_auth_settings');
     $applicationsettings->add($idptypesetting);
+
+    // Microsoft cloud.
+    $microsoftcloudoptions = [
+        AUTH_OIDC_MICROSOFT_CLOUD_GLOBAL => get_string('microsoftcloud_global', 'auth_oidc'),
+        AUTH_OIDC_MICROSOFT_CLOUD_CHINA => get_string('microsoftcloud_china', 'auth_oidc'),
+    ];
+    $microsoftcloudsetting = new admin_setting_configselect(
+        'auth_oidc/microsoftcloud',
+        get_string('microsoftcloud', 'auth_oidc'),
+        get_string('microsoftcloud_help', 'auth_oidc'),
+        AUTH_OIDC_MICROSOFT_CLOUD_GLOBAL,
+        $microsoftcloudoptions
+    );
+    $microsoftcloudsetting->set_updatedcallback('auth_oidc_reset_app_tokens');
+    $applicationsettings->add($microsoftcloudsetting);
+    $applicationsettings->hide_if('auth_oidc/microsoftcloud', 'auth_oidc/idptype', 'eq', AUTH_OIDC_IDP_TYPE_OTHER);
 
     // Client ID.
     $clientidsetting = new admin_setting_configtext(
@@ -241,7 +254,7 @@ if ($hassiteconfig) {
         'auth_oidc/authendpoint',
         get_string('authendpoint', 'auth_oidc'),
         get_string('authendpoint_help', 'auth_oidc'),
-        'https://login.microsoftonline.com/organizations/oauth2/authorize',
+        auth_oidc_get_login_baseurl() . '/organizations/oauth2/authorize',
         'auth'
     );
     $authendpointsetting->set_updatedcallback('auth_oidc_reset_app_tokens');
@@ -252,7 +265,7 @@ if ($hassiteconfig) {
         'auth_oidc/tokenendpoint',
         get_string('tokenendpoint', 'auth_oidc'),
         get_string('tokenendpoint_help', 'auth_oidc'),
-        'https://login.microsoftonline.com/organizations/oauth2/token',
+        auth_oidc_get_login_baseurl() . '/organizations/oauth2/token',
         'token'
     );
     $tokenendpointsetting->set_updatedcallback('auth_oidc_reset_app_tokens');
@@ -270,11 +283,19 @@ if ($hassiteconfig) {
         'auth_oidc/oidcresource',
         get_string('oidcresource', 'auth_oidc'),
         get_string('oidcresource_help', 'auth_oidc'),
-        'https://graph.microsoft.com',
+        auth_oidc_get_graph_resource(),
         PARAM_TEXT
     );
     $oidcresourcesetting->set_updatedcallback('auth_oidc_reset_app_tokens');
     $applicationsettings->add($oidcresourcesetting);
+
+    // Conditional display: OIDC resource is only sent for Microsoft Entra ID (v1.0).
+    $applicationsettings->hide_if(
+        'auth_oidc/oidcresource',
+        'auth_oidc/idptype',
+        'neq',
+        AUTH_OIDC_IDP_TYPE_MICROSOFT_ENTRA_ID
+    );
 
     // OIDC scope.
     $oidcscopesetting = new admin_setting_configtext(
@@ -286,6 +307,27 @@ if ($hassiteconfig) {
     );
     $oidcscopesetting->set_updatedcallback('auth_oidc_reset_app_tokens');
     $applicationsettings->add($oidcscopesetting);
+
+    // Custom claims.
+    $customclaimssetting = new auth_oidc_admin_setting_customclaims(
+        'auth_oidc/customclaims',
+        get_string('customclaims', 'auth_oidc'),
+        get_string('customclaims_help', 'auth_oidc'),
+        '',
+        PARAM_TEXT,
+        100
+    );
+    $applicationsettings->add($customclaimssetting);
+
+    // Use PKCE.
+    $applicationsettings->add(
+        new admin_setting_configcheckbox(
+            'auth_oidc/usepkce',
+            get_string('cfg_usepkce_key', 'auth_oidc'),
+            get_string('cfg_usepkce_desc', 'auth_oidc'),
+            1
+        )
+    );
 
     // Secret expiry notification (only when local_o365 is installed).
     if (auth_oidc_is_local_365_installed()) {
@@ -419,11 +461,15 @@ if ($hassiteconfig) {
             get_string('settings_page_binding_username_claim', 'auth_oidc')
         );
 
-        // Add navigation tabs.
+        // Add navigation tabs, with a warning that this is an advanced setting.
         $bindingusernamesettings->add(new admin_setting_heading(
             'auth_oidc_binding_username_claim_nav',
             '',
-            auth_oidc_get_settings_nav_html('auth_oidc_binding_username_claim')
+            auth_oidc_get_settings_nav_html(
+                'auth_oidc_binding_username_claim',
+                null,
+                auth_oidc_get_binding_username_claim_warning_html()
+            )
         ));
 
         // Determine options and description based on IdP type and user sync state.
@@ -568,14 +614,13 @@ if ($hassiteconfig) {
         )
     );
 
-    // Auto-append.
+    // Force account selection.
     $settings->add(
-        new admin_setting_configtext(
-            'auth_oidc/autoappend',
-            get_string('cfg_autoappend_key', 'auth_oidc'),
-            get_string('cfg_autoappend_desc', 'auth_oidc'),
-            '',
-            PARAM_TEXT
+        new admin_setting_configcheckbox(
+            'auth_oidc/forceselectaccount',
+            get_string('cfg_forceselectaccount_key', 'auth_oidc'),
+            get_string('cfg_forceselectaccount_desc', 'auth_oidc'),
+            0
         )
     );
 
@@ -587,16 +632,6 @@ if ($hassiteconfig) {
             get_string('cfg_domainhint_desc', 'auth_oidc'),
             '',
             PARAM_TEXT
-        )
-    );
-
-    // Login flow.
-    $settings->add(
-        new auth_oidc_admin_setting_loginflow(
-            'auth_oidc/loginflow',
-            get_string('cfg_loginflow_key', 'auth_oidc'),
-            '',
-            'authcode'
         )
     );
 
@@ -684,6 +719,38 @@ if ($hassiteconfig) {
         )
     );
 
+    // Placeholder email heading.
+    $settings->add(
+        new admin_setting_heading(
+            'auth_oidc/dummy_email_heading',
+            get_string('heading_dummy_email', 'auth_oidc'),
+            get_string('heading_dummy_email_desc', 'auth_oidc')
+        )
+    );
+
+    // Generate placeholder email addresses.
+    $settings->add(
+        new admin_setting_configcheckbox(
+            'auth_oidc/generatedummyemail',
+            get_string('cfg_generatedummyemail_key', 'auth_oidc'),
+            get_string('cfg_generatedummyemail_desc', 'auth_oidc'),
+            '0'
+        )
+    );
+
+    // Domain to use for placeholder email addresses.
+    $settings->add(
+        new admin_setting_configtext(
+            'auth_oidc/dummyemaildomain',
+            get_string('cfg_dummyemaildomain_key', 'auth_oidc'),
+            get_string('cfg_dummyemaildomain_desc', 'auth_oidc'),
+            '',
+            PARAM_TEXT
+        )
+    );
+
+    $settings->hide_if('auth_oidc/dummyemaildomain', 'auth_oidc/generatedummyemail', 'notchecked');
+
     // Sign out integration heading.
     $settings->add(
         new admin_setting_heading(
@@ -709,7 +776,7 @@ if ($hassiteconfig) {
             'auth_oidc/logouturi',
             get_string('cfg_logoutendpoint_key', 'auth_oidc'),
             get_string('cfg_logoutendpoint_desc', 'auth_oidc'),
-            'https://login.microsoftonline.com/organizations/oauth2/logout',
+            auth_oidc_get_login_baseurl() . '/organizations/oauth2/logout',
             PARAM_URL
         )
     );
@@ -734,6 +801,14 @@ if ($hassiteconfig) {
             get_string('heading_display_desc', 'auth_oidc')
         )
     );
+
+    // Show login button.
+    $settings->add(new admin_setting_configcheckbox(
+        'auth_oidc/showbutton',
+        get_string('cfg_showbutton_key', 'auth_oidc'),
+        get_string('cfg_showbutton_desc', 'auth_oidc'),
+        '1'
+    ));
 
     // Provider Name (opname).
     $settings->add(
@@ -809,6 +884,11 @@ if ($hassiteconfig) {
     $settings->hide_if('auth_oidc/icon', 'auth_oidc/set_pix', 'notchecked');
     $settings->hide_if('auth_oidc/customicon', 'auth_oidc/set_pix', 'notchecked');
 
+    $settings->hide_if('auth_oidc/opname', 'auth_oidc/showbutton', 'notchecked');
+    $settings->hide_if('auth_oidc/set_pix', 'auth_oidc/showbutton', 'notchecked');
+    $settings->hide_if('auth_oidc/icon', 'auth_oidc/showbutton', 'notchecked');
+    $settings->hide_if('auth_oidc/customicon', 'auth_oidc/showbutton', 'notchecked');
+
     // Debugging heading.
     $settings->add(
         new admin_setting_heading(
@@ -830,11 +910,14 @@ if ($hassiteconfig) {
 
     // Tools heading.
     $cleanupurl = new \core\url('/auth/oidc/cleanupoidctokens.php');
+    $clearusertokensurl = new \core\url('/auth/oidc/clearusertokens.php');
     $settings->add(
         new admin_setting_heading(
             'auth_oidc/tools_heading',
             get_string('heading_tools', 'auth_oidc'),
-            get_string('cleanup_oidc_tokens_link_desc', 'auth_oidc', $cleanupurl->out())
+            get_string('cleanup_oidc_tokens_link_desc', 'auth_oidc', $cleanupurl->out()) .
+            html_writer::empty_tag('br') .
+            get_string('clear_user_tokens_link_desc', 'auth_oidc', $clearusertokensurl->out())
         )
     );
 
@@ -847,6 +930,16 @@ if ($hassiteconfig) {
             'auth_oidc_cleanup_oidc_tokens',
             get_string('settings_page_cleanup_oidc_tokens', 'auth_oidc'),
             new url('/auth/oidc/cleanupoidctokens.php')
+        )
+    );
+
+    // Clear user tokens page.
+    $ADMIN->add(
+        'oidcfolder',
+        new admin_externalpage(
+            'auth_oidc_clear_user_tokens',
+            get_string('settings_page_clear_user_tokens', 'auth_oidc'),
+            new url('/auth/oidc/clearusertokens.php')
         )
     );
 

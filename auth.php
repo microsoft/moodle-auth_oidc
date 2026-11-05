@@ -58,15 +58,8 @@ class auth_plugin_oidc extends \auth_plugin_base {
             isset($SESSION->stateadditionaldata['forceflow'])
         ) {
             $loginflow = $SESSION->stateadditionaldata['forceflow'];
-        } else {
-            if (!empty($forceloginflow) && is_string($forceloginflow)) {
-                $loginflow = $forceloginflow;
-            } else {
-                $configuredloginflow = get_config('auth_oidc', 'loginflow');
-                if (!empty($configuredloginflow)) {
-                    $loginflow = $configuredloginflow;
-                }
-            }
+        } else if (!empty($forceloginflow) && is_string($forceloginflow)) {
+            $loginflow = $forceloginflow;
         }
         $loginflowclass = '\auth_oidc\loginflow\\' . $loginflow;
         if (class_exists($loginflowclass)) {
@@ -340,7 +333,7 @@ class auth_plugin_oidc extends \auth_plugin_base {
             case AUTH_OIDC_IDP_TYPE_MICROSOFT_ENTRA_ID:
             case AUTH_OIDC_IDP_TYPE_MICROSOFT_IDENTITY_PLATFORM:
                 if (!$logouturl) {
-                    $logouturl = 'https://login.microsoftonline.com/organizations/oauth2/logout';
+                    $logouturl = auth_oidc_get_login_baseurl() . '/organizations/oauth2/logout';
                 }
                 $url = new url($logouturl, $params);
                 return $url->out(false);

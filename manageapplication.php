@@ -38,8 +38,8 @@ $url = new url('/auth/oidc/manageapplication.php');
 $PAGE->set_url($url);
 $PAGE->set_context(system::instance());
 $PAGE->set_pagelayout('admin');
-$PAGE->set_heading(get_string('settings_page_application', 'auth_oidc'));
-$PAGE->set_title(get_string('settings_page_application', 'auth_oidc'));
+$PAGE->set_heading(get_string('settings_page_application_wizard', 'auth_oidc'));
+$PAGE->set_title(get_string('settings_page_application_wizard', 'auth_oidc'));
 
 $jsparams = [AUTH_OIDC_IDP_TYPE_MICROSOFT_IDENTITY_PLATFORM, AUTH_OIDC_AUTH_METHOD_SECRET, AUTH_OIDC_AUTH_METHOD_CERTIFICATE,
     get_string('auth_method_certificate', 'auth_oidc')];
@@ -65,7 +65,7 @@ $formsubmitted = optional_param('submitbutton', '', PARAM_TEXT);
 
 foreach (
     [
-        'idptype', 'clientid', 'clientauthmethod', 'clientsecret', 'clientprivatekey', 'clientcert',
+        'idptype', 'microsoftcloud', 'clientid', 'clientauthmethod', 'clientsecret', 'clientprivatekey', 'clientcert',
         'clientcertsource', 'clientprivatekeyfile', 'clientcertfile', 'clientcertpassphrase',
         'authendpoint', 'tokenendpoint', 'oidcresource', 'oidcscope', 'secretexpiryrecipients',
         'bindingusernameclaim', 'customclaimname', 'customclaims',
@@ -105,7 +105,7 @@ if ($form->is_cancelled()) {
     }
 
     // Prepare config settings to save.
-    $configstosave = ['idptype', 'clientid', 'clientauthmethod', 'authendpoint', 'tokenendpoint',
+    $configstosave = ['idptype', 'microsoftcloud', 'clientid', 'clientauthmethod', 'authendpoint', 'tokenendpoint',
         'oidcresource', 'oidcscope', 'customclaims'];
 
     // Depending on the value of clientauthmethod, save clientsecret or (clientprivatekey and clientcert).
@@ -187,7 +187,7 @@ if ($form->is_cancelled()) {
         if ($isgraphapiconnected) {
             // First, delete the existing application token and purge cache.
             unset_config('apptokens', 'local_o365');
-            unset_config('azuresetupresult', 'local_o365');
+            unset_config('verifysetupresult', 'local_o365');
             purge_all_caches();
 
             // Then show the message to the user with instructions to update the application token.
@@ -204,6 +204,7 @@ if ($form->is_cancelled()) {
 }
 
 echo $OUTPUT->header();
+echo auth_oidc_get_settings_nav_html('authsettingoidc', get_string('settings_page_application_wizard', 'auth_oidc'));
 
 $form->display();
 

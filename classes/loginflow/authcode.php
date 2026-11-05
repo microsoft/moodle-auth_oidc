@@ -59,6 +59,10 @@ class authcode extends base {
         if (!auth_oidc_is_setup_complete()) {
             return [];
         }
+        $showbutton = isset($this->config->showbutton) ? $this->config->showbutton : true;
+        if (!$showbutton) {
+            return [];
+        }
         $showicon = isset($this->config->set_pix) ? $this->config->set_pix : true;
         $name = strip_tags(format_text($this->config->opname));
         $idpentry = [
@@ -148,6 +152,18 @@ class authcode extends base {
     }
 
     /**
+     * Check whether an authorization error returned by the identity provider means multi-factor authentication is required.
+     *
+     * @param string $error The error code returned by the identity provider.
+     * @param string $errordescription The error description returned by the identity provider.
+     * @return bool
+     */
+    public static function is_mfa_required_error(string $error, string $errordescription): bool {
+        // AADSTS50076: multi-factor authentication is required.
+        return $error === 'interaction_required' || strpos($errordescription, 'AADSTS50076') !== false;
+    }
+
+    /**
      * Handle requests to the redirect URL.
      *
      * @return mixed Determined by loginflow.
@@ -158,8 +174,15 @@ class authcode extends base {
         $error = optional_param('error', '', PARAM_TEXT);
         $errordescription = optional_param('error_description', '', PARAM_TEXT);
         $silentloginmode = get_config('auth_oidc', 'silentloginmode');
-        $selectaccount = false;
+        $selectaccount = empty(optional_param('state', '', PARAM_RAW)) && optional_param('selectaccount', 0, PARAM_BOOL);
+        $restoredwantsurl = null;
         if ($silentloginmode) {
+            if ($error == 'login_required' || $error == 'interaction_required') {
+                $restoredwantsurl = $this->restore_wantsurl_from_state();
+                if ($restoredwantsurl !== null) {
+                    $SESSION->wantsurl = $restoredwantsurl;
+                }
+            }
             if ($error == 'login_required') {
                 // If silent login mode is enabled and the error is 'login_required', redirect to the login page.
                 $loginpageurl = new url('/login/index.php', ['noredirect' => 1]);
@@ -199,7 +222,8 @@ class authcode extends base {
             $requestparams = [
                 'state' => $state,
                 'code' => $code,
-                'error_description' => optional_param('error_description', '', PARAM_TEXT),
+                'error' => $error,
+                'error_description' => $errordescription,
             ];
             // Response from OP.
             $this->handleauthresponse($requestparams);
@@ -216,7 +240,18 @@ class authcode extends base {
             }
             // Handle guest account session termination.
             if (isguestuser()) {
+                // Keep the url the user was heading to, because terminate_current() discards it with the guest session.
+                if ($restoredwantsurl === null && !empty($SESSION->wantsurl)) {
+                    $guestwantsurl = ($SESSION->wantsurl instanceof url) ? $SESSION->wantsurl->out() : (string)$SESSION->wantsurl;
+                    if ($this->is_valid_local_url($guestwantsurl)) {
+                        $restoredwantsurl = $guestwantsurl;
+                    }
+                }
                 \core\session\manager::terminate_current();
+            }
+            // Re-assign because terminate_current() above replaces $SESSION with a new object.
+            if ($restoredwantsurl !== null) {
+                $SESSION->wantsurl = $restoredwantsurl;
             }
             // Initial login request.
             $stateparams = ['forceflow' => 'authcode'];
@@ -348,6 +383,41 @@ class authcode extends base {
 
         echo $OUTPUT->redirect_message($url->out(), $message, $delay, false, notification::NOTIFY_ERROR);
         exit;
+    }
+
+    /**
+     * Recover the wantsurl carried in the state record when a silent login attempt fails.
+     *
+     * The IdP response arrives as a cross-site form_post, which browsers drop the SameSite=Lax
+     * session cookie on (MDL-83526), leaving the state record as the only surviving carrier.
+     * Returns rather than assigns: terminate_current() can replace $SESSION before the caller uses it.
+     *
+     * @return string|null The originally requested local URL, or null if there is none to restore.
+     */
+    protected function restore_wantsurl_from_state(): ?string {
+        global $DB;
+
+        // Not getoidcparam(): it throws, and this path must still reach the login page.
+        $state = optional_param('state', '', PARAM_ALPHANUM);
+        if (empty($state)) {
+            return null;
+        }
+
+        $staterec = $DB->get_record('auth_oidc_state', ['state' => $state]);
+        if (empty($staterec) || empty($staterec->additionaldata)) {
+            return null;
+        }
+
+        $additionaldata = @unserialize($staterec->additionaldata);
+        if (!is_array($additionaldata) || empty($additionaldata['wantsurl'])) {
+            return null;
+        }
+
+        $wantsurl = ($additionaldata['wantsurl'] instanceof url)
+            ? $additionaldata['wantsurl']->out()
+            : (string) $additionaldata['wantsurl'];
+
+        return $this->is_valid_local_url($wantsurl) ? $wantsurl : null;
     }
 
     /**
@@ -513,9 +583,14 @@ class authcode extends base {
 
         $sid = optional_param('session_state', '', PARAM_TEXT);
 
-        if (!empty($authparams['error_description'])) {
+        if (!empty($authparams['error']) || !empty($authparams['error_description'])) {
             utils::debug('Authorization error.', __METHOD__, $authparams);
-            redirect($CFG->wwwroot, get_string('errorauthgeneral', 'auth_oidc'), null, notification::NOTIFY_ERROR);
+            if (static::is_mfa_required_error($authparams['error'] ?? '', $authparams['error_description'] ?? '')) {
+                $errormessage = get_string('errorauthmfarequired', 'auth_oidc');
+            } else {
+                $errormessage = get_string('errorauthgeneral', 'auth_oidc');
+            }
+            redirect($CFG->wwwroot, $errormessage, null, notification::NOTIFY_ERROR);
         }
 
         if (!isset($authparams['code'])) {
@@ -540,6 +615,7 @@ class authcode extends base {
         }
 
         $orignonce = $staterec->nonce;
+        $codeverifier = $staterec->codeverifier ?? '';
         $additionaldata = [];
         if (!empty($staterec->additionaldata)) {
             $additionaldata = @unserialize($staterec->additionaldata);
@@ -552,7 +628,7 @@ class authcode extends base {
 
         // Get token from auth code.
         $client = $this->get_oidcclient();
-        $tokenparams = $client->tokenrequest($authparams['code']);
+        $tokenparams = $client->tokenrequest($authparams['code'], $codeverifier);
         if (!isset($tokenparams['id_token'])) {
             throw new moodle_exception('errorauthnoidtoken', 'auth_oidc');
         }
@@ -630,7 +706,7 @@ class authcode extends base {
                                                  FROM {user}
                                                 WHERE username = ?
                                                       AND id != ?',
-                [$oidcusername, $USER->id]
+                [trim(core_text::strtolower((string) $oidcusername)), $USER->id]
             );
 
             if (!empty($userrec)) {
@@ -917,7 +993,7 @@ class authcode extends base {
                         // 2. can change token record.
                         if ($user->auth == 'oidc') {
                             $user->username = strtolower($oidcusername);
-                            user_update_user($user, false);
+                            \core\user::update_user($user, false);
 
                             $fullmessage = 'Attempt to change username of user ' . $user->id . ' from ' .
                                 $tokenrec->useridentifier . ' to ' . strtolower($oidcusername);
@@ -1007,7 +1083,7 @@ class authcode extends base {
             } else {
                 $originalusername = $existinguser->username;
                 $existinguser->username = $username;
-                user_update_user($existinguser, false);
+                \core\user::update_user($existinguser, false);
 
                 $fullmessage =
                     'Attempt to change username of user ' . $existinguser->id . ' from ' . $originalusername . ' to ' .
@@ -1088,7 +1164,9 @@ class authcode extends base {
                 if (empty($CFG->authpreventaccountcreation)) {
                     if (!$CFG->allowaccountssameemail) {
                         $userinfo = $this->get_userinfo($username);
-                        if ($DB->count_records('user', ['email' => $userinfo['email'], 'deleted' => 0]) > 0) {
+                        // Compare emails case-insensitively, so that john@example.com and John@example.com are duplicates.
+                        $emailselect = $DB->sql_equal('email', ':email', false) . ' AND deleted = 0';
+                        if ($DB->count_records_select('user', $emailselect, ['email' => $userinfo['email']]) > 0) {
                             throw new moodle_exception('errorauthloginfaileddupemail', 'auth_oidc', null, null, '1');
                         }
                     }
@@ -1108,7 +1186,8 @@ class authcode extends base {
                     $eventdata = ['other' => ['username' => $username, 'reason' => $failurereason]];
                     $event = \core\event\user_login_failed::create($eventdata);
                     $event->trigger();
-                    throw new moodle_exception('errorauthloginfailednouser', 'auth_oidc', null, null, '1');
+                    $retryurl = new url('/auth/oidc/', ['selectaccount' => 1]);
+                    throw new moodle_exception('errorauthloginfailednouser', 'auth_oidc', $retryurl, $username);
                 }
             }
 
@@ -1138,6 +1217,13 @@ class authcode extends base {
                 redirect($CFG->wwwroot, get_string('errorauthgeneral', 'auth_oidc'), null, notification::NOTIFY_ERROR);
             }
         }
+
+        // When the login completes inside an iframe (e.g. the Microsoft Teams tab), the SameSite=Lax session cookie
+        // set by core (MDL-83526) is rejected by the browser, and the next request would be anonymous.
+        if (($_SERVER['HTTP_SEC_FETCH_DEST'] ?? '') === 'iframe') {
+            utils::set_session_cookie_samesite_none();
+        }
+
         return true;
     }
 }

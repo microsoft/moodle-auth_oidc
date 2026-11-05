@@ -33,11 +33,14 @@ $string['pluginname'] = 'OpenID Connect';
 $string['auth_oidcdescription'] = 'The OpenID Connect authentication plugin provides single-sign-on functionality using configurable IdP.';
 
 // Configuration pages.
+$string['settings_pageheading'] = '{$a} configuration';
 $string['settings_page_other_settings'] = 'Other options';
 $string['settings_page_application'] = 'IdP and authentication';
+$string['settings_page_application_wizard'] = 'Application Configuration Wizard';
 $string['settings_page_binding_username_claim'] = 'Binding username claim';
 $string['settings_page_change_binding_username_claim_tool'] = 'Change binding username claim tool';
 $string['settings_page_cleanup_oidc_tokens'] = 'Cleanup OpenID Connect tokens';
+$string['settings_page_clear_user_tokens'] = 'Clear user tokens';
 $string['settings_page_field_mapping'] = 'Field mappings';
 $string['heading_basic'] = 'Basic settings';
 $string['heading_basic_desc'] = '';
@@ -55,6 +58,11 @@ $string['heading_debugging'] = 'Debugging';
 $string['heading_debugging_desc'] = '';
 $string['heading_tools'] = 'Tools';
 $string['heading_tools_desc'] = '';
+$string['microsoftcloud'] = 'Microsoft cloud';
+$string['microsoftcloud_help'] = 'Select the Microsoft cloud your Microsoft Entra tenant belongs to. It applies to the Microsoft Entra ID and Microsoft Identity Platform IdP types.<br/>
+Select "Microsoft 365 operated by 21Vianet (China)" if your organisation uses Microsoft 365 provided by 21Vianet. The sign-in service and Microsoft Graph endpoints of that cloud are then used for the requests made by the plugins, and the default values of the endpoints and resource below follow it. The values already saved for the endpoints, resource and logout endpoint are not changed, so update them if they are still set to the endpoints of the global cloud.';
+$string['microsoftcloud_global'] = 'Microsoft 365 (global)';
+$string['microsoftcloud_china'] = 'Microsoft 365 operated by 21Vianet (China)';
 $string['idptype'] = 'Identity Provider (IdP) Type';
 $string['idptype_help'] = 'Three types of IdP are currently supported:
 <ul>
@@ -73,8 +81,6 @@ $string['settings_application_wizard_desc'] = 'To configure these settings using
 $string['authendpoint'] = 'Authorization Endpoint';
 $string['authendpoint_help'] = 'The URI of the Authorization endpoint from your IdP to use.<br/>
 Note if the site is to be configured to allow users from other tenants to access, tenant specific authorization endpoint cannot be used.';
-$string['cfg_autoappend_key'] = 'Auto-Append';
-$string['cfg_autoappend_desc'] = 'Automatically append this string when logging in users using the "Resource Owner Password Credentials" authentication method. This is useful when your IdP requires a common domain, but don\'t want to require users to type it in when logging in. For example, if the full OpenID Connect user is "james@example.com" and you enter "@example.com" here, the user will only have to enter "james" as their username. <br /><b>Note:</b> In the case where conflicting usernames exist - i.e. a Moodle user exists wth the same name, the priority of the authentication plugin is used to determine which user wins out.';
 $string['clientid'] = 'Application ID';
 $string['clientid_help'] = 'The registered Application / Client ID on the IdP.';
 $string['clientauthmethod'] = 'Client authentication method';
@@ -108,12 +114,17 @@ $string['change_client_secret'] = 'Change client secret';
 $string['change_client_secret_desc'] = 'Check this box to update the client secret. For security, existing secrets are masked and only the first 2 characters are shown.';
 $string['change_cert_passphrase'] = 'Change certificate passphrase';
 $string['change_cert_passphrase_desc'] = 'Check this box to update the certificate passphrase. For security, existing passphrases are masked and only the first 2 characters are shown.';
+$string['cfg_usepkce_key'] = 'Use PKCE';
+$string['cfg_usepkce_desc'] = 'When using the <b>Authorization Code</b> login flow, send a PKCE (RFC 7636) "code_challenge" with the S256 method in the authorization request, and the matching "code_verifier" when exchanging the authorization code. Microsoft Entra ID supports this. For other providers, enable this only if your provider supports PKCE, as some providers reject authorization requests with parameters they do not recognise.';
 $string['cfg_domainhint_key'] = 'Domain Hint';
 $string['cfg_domainhint_desc'] = 'When using the <b>Authorization Code</b> login flow, pass this value as the "domain_hint" parameter. "domain_hint" is used by some OpenID Connect IdP to make the login process easier for users. Check with your provider to see whether they support this parameter.';
 $string['cfg_err_invalidauthendpoint'] = 'Invalid Authorization Endpoint';
 $string['cfg_err_invalidtokenendpoint'] = 'Invalid Token Endpoint';
 $string['cfg_err_invalidclientid'] = 'Invalid client ID';
 $string['cfg_err_invalidclientsecret'] = 'Invalid client secret';
+$string['cfg_forceselectaccount_key'] = 'Always show account selection';
+$string['cfg_forceselectaccount_desc'] = 'If enabled, users are always asked to choose which account to sign in with, instead of being signed in automatically with the account active in their browser. Useful when users have several accounts, for example a student and an admin account.<br/>
+Silent Login Mode takes precedence: while it is enabled, the account selection is not forced when signing in silently.';
 $string['cfg_forceredirect_key'] = 'Force redirect';
 $string['cfg_forceredirect_desc'] = 'If enabled, will skip the login index page and redirect to the OpenID Connect page. Can be bypassed with ?noredirect=1 URL param';
 $string['cfg_stateexpiry_key'] = 'Login state expiry (minutes)';
@@ -138,9 +149,6 @@ $string['cfg_customicon_key'] = 'Custom Icon';
 $string['cfg_customicon_desc'] = 'If you\'d like to use your own icon, upload it here. This overrides any icon chosen above. <br /><br /><b>Notes on using custom icons:</b><ul><li>The uploaded file is not resized. It will be displayed at a fixed size of 24x24 pixels on the login page, with your browser scaling it to fit, so we recommend uploading a square image to avoid distortion.</li><li>If you have uploaded a custom icon and want to go back to one of the stock icons, click the custom icon in the box above, then click "Delete", then click "OK", then click "Save Changes" at the bottom of this form. The selected stock icon will now appear on the Moodle login page.</li></ul>';
 $string['cfg_debugmode_key'] = 'Record debug messages';
 $string['cfg_debugmode_desc'] = 'If enabled, information will be logged to the Moodle log that can help in identifying problems.';
-$string['cfg_loginflow_key'] = 'Login Flow';
-$string['cfg_loginflow_authcode'] = 'Authorization Code Flow <b>(recommended)</b>';
-$string['cfg_loginflow_authcode_desc'] = 'Using this flow, the user clicks the name of the IdP (See "Provider Display Name" above) on the Moodle login page and is redirected to the provider to log in. Once successfully logged in, the user is redirected back to Moodle where the Moodle login takes place transparently. This is the most standardized, secure way for the user log in.';
 $string['cfg_silentloginmode_key'] = 'Silent Login Mode';
 $string['cfg_silentloginmode_desc'] = 'If enabled, Moodle will try to use the active session of a user authenticated to the configured authorization endpoint to log the user in.<br/>
 To use this feature, the following configurations are required:
@@ -169,12 +177,17 @@ $string['customclaims_help'] = 'Space-separated list of custom claim names from 
 <li>Claims must exist in your IdP\'s token configuration (e.g., Keycloak protocol mappers, Azure AD optional/custom claims)</li>
 <li>If a claim doesn\'t exist in the token, field mapping will silently skip it - no error will be shown</li>
 <li>Claim names are case-sensitive and can only contain alphanumeric characters, hyphens, and underscores</li>
-<li>Examples: <code>employee_type department costCenter custom_role</code></li>
+<li>A claim name cannot be a reserved name, such as a standard JWT/OpenID Connect claim (e.g., <code>sub</code>, <code>email</code>), one specific to Microsoft Entra ID (e.g., <code>oid</code>, <code>upn</code>) or Keycloak (e.g., <code>realm_access</code>, <code>resource_access</code>), or an existing field mapping option</li>
+<li>The <code>roles</code> claim (App roles in Microsoft Entra ID tokens) and the <code>groups</code> claim (group IDs) are allowed. They are listed as "roles (token claim)" and "groups (token claim)" in field mapping, separate from the built-in "Roles" and "Groups" options, which map Microsoft Entra directory roles and group names from Microsoft Graph. Claims containing a list of values are stored as a comma-separated list</li>
+<li>Examples: <code>employee_type badge_number costCenter custom_role</code></li>
+<li>At login, custom claims are always read from the token, whether or not Microsoft Graph is also used. During the scheduled user sync task, there is no user token to read from, so a custom claim is only synced when its name also happens to be a selectable Microsoft Graph user property, such as a directory extension attribute (e.g., <code>extension_d7b7d16e4a70ac2c5fa01ddc3d4ab596_jobCode</code>). A custom claim that Microsoft Graph rejects is skipped for that sync run, with a warning in the task log, rather than failing the whole sync.</li>
 </ul>';
 $string['secretexpiryrecipients'] = 'Secret Expiry Notification Recipients';
 $string['secretexpiryrecipients_help'] = 'A comma-separated list of email addresses to send secret expiry notifications to.<br/>
 If no email address is entered, the main site administrator will be notified.<br/>
 By default, notifications are sent daily from four weeks before expiry until the secret has been renewed.';
+$string['cfg_showbutton_key'] = 'Show login button';
+$string['cfg_showbutton_desc'] = 'If disabled, the provider login button is not displayed on the login page. Users can still authenticate via this provider by navigating directly to its login URL.';
 $string['cfg_opname_key'] = 'Provider Display Name';
 $string['cfg_opname_desc'] = 'This is an end-user-facing label that identifies the type of credentials the user must use to login. This label is used throughout the user-facing portions of this plugin to identify your provider.';
 $string['cfg_redirecturi_key'] = 'Redirect URI';
@@ -186,6 +199,12 @@ $string['cfg_userrestrictions_key'] = 'User Restrictions';
 $string['cfg_userrestrictions_desc'] = 'Only allow users that meet certain restrictions to log in. <br /><b>How to use user restrictions: </b> <ul><li>Enter a <a href="https://en.wikipedia.org/wiki/Regular_expression">regular expression</a> pattern that matches the usernames of users you want to allow.</li><li>Enter one pattern per line</li><li>If you enter multiple patterns a user will be allowed if they match ANY of the patterns.</li><li>The character "/" should be escaped with "\".</li><li>If you don\'t enter any restrictions above, all users that can log in to the OpenID Connect IdP will be accepted by Moodle.</li><li>Any user that does not match any entered pattern(s) will be prevented from logging in using OpenID Connect.</li></ul>';
 $string['cfg_userrestrictionscasesensitive_key'] = 'User Restrictions Case Sensitive';
 $string['cfg_userrestrictionscasesensitive_desc'] = 'This controls if the "/i" option in regular expression is used in the user restriction match.<br/>If enabled, all user restriction checks will be performed as with case sensitive. Note if this is disabled, any patterns on letter cases will be ignored.';
+$string['heading_dummy_email'] = 'Placeholder email addresses';
+$string['heading_dummy_email_desc'] = 'Moodle requires every user account to have an email address, but Microsoft Entra ID accounts are not required to have one. The settings below let Moodle generate a non-deliverable placeholder address for users who don\'t have a usable email address from the IdP, instead of leaving their email address blank.';
+$string['cfg_generatedummyemail_key'] = 'Generate placeholder email addresses';
+$string['cfg_generatedummyemail_desc'] = 'If enabled, when a user has no email address and no usable email-formatted user principal name from the IdP, Moodle will generate a placeholder email address for them using their Microsoft user principal name (or object ID, if no user principal name is available) and the domain configured below, instead of leaving their email address blank. This applies both when a user logs in and when they are provisioned by the user sync task.';
+$string['cfg_dummyemaildomain_key'] = 'Placeholder email domain';
+$string['cfg_dummyemaildomain_desc'] = 'The domain to use when generating placeholder email addresses, for example "example.test". Use a domain that cannot receive mail, so that generated addresses can never be mistaken for a real, deliverable one.';
 $string['cfg_signoffintegration_key'] = 'Single Sign Out (from Moodle to IdP)';
 $string['cfg_signoffintegration_desc'] = 'If the option is enabled, when a Moodle user connected to the configured IdP logs out of Moodle, the integration will trigger a request at the logout endpiont below, attempting to log the user off from IdP as well.<br/>
 Note for integration with Microsoft Entra ID, the URL of Moodle site ({$a}) needs to be added as a redirect URI in the Azure app created for Moodle and Microsoft 365 integration.';
@@ -237,8 +256,9 @@ $string['errorauthdisconnectinvalidmethod'] = 'Invalid login method received.';
 $string['errorauthdisconnectifmanual'] = 'If using the manual login method, enter credentials below.';
 $string['errorauthgeneral'] = 'There was a problem logging you in. Please contact your administrator for assistance.';
 $string['errorauthinvalididtoken'] = 'Invalid id_token received.';
-$string['errorauthloginfailednouser'] = 'Invalid login: User not found in Moodle. If this site has the "authpreventaccountcreation" setting enabled, this may mean you need an administrator to create an account for you first.';
+$string['errorauthloginfailednouser'] = 'Invalid login: You signed in as "{$a}", but there is no matching account on this site and new accounts cannot be created automatically. Please contact the site administrator for assistance. If you have more than one account, select Continue to sign in with a different one.';
 $string['errorauthloginfaileddupemail'] = 'Invalid login: An existing account on this Moodle has the same email address as the account you try to create, and "Allow accounts with same email" (allowaccountssameemail) setting is disabled.';
+$string['errorauthmfarequired'] = 'Microsoft requires multi-factor authentication to complete your login, but it could not be completed. Please try again, or sign in to Microsoft 365 in a new browser session and complete the multi-factor authentication prompt.';
 $string['errorauthnoauthcode'] = 'No authorization code was received from the identity server. The error logs may have more information.';
 $string['errorauthnocredsandendpoints'] = 'Please configure OpenID Connect client credentials and endpoints.';
 $string['errorauthnohttpclient'] = 'Please set an HTTP client.';
@@ -280,7 +300,7 @@ $string['error_endpoint_mismatch_auth_endpoint'] = 'The configured authorization
 $string['error_endpoint_mismatch_token_endpoint'] = 'The configured token endpoint does not match the configured IdP type. For "Microsoft Entra ID (v1.0)" use a v1.0 endpoint (e.g. https://login.microsoftonline.com/organizations/oauth2/token). For "Microsoft identity platform (v2.0)" use a v2.0 endpoint (e.g. https://login.microsoftonline.com/organizations/oauth2/v2.0/token).';
 $string['error_tenant_specific_endpoint_required'] = 'When using "Microsoft identity platform (v2.0)" IdP type and "Certificate" authentication method, tenant specific endpoint (i.e. not common/organizations/consumers) is required.';
 $string['error_empty_oidcresource'] = 'Resource cannot be empty when using Microsoft Entra ID (v1.0) or other types of IdP.';
-$string['error_invalid_custom_claim'] = 'Invalid custom claim name. Custom claims can only contain alphanumeric characters, hyphens, and underscores.';
+$string['error_invalid_custom_claim'] = 'Invalid custom claim name(s): {$a}. Custom claim names can only contain alphanumeric characters, hyphens, and underscores, and cannot be a reserved claim name (e.g. a standard JWT/OpenID Connect claim, or one specific to Microsoft Entra ID or Keycloak) or an existing field mapping option.';
 $string['error_masked_secret_not_changed'] = 'Please enter a new value or uncheck the "Change" checkbox to keep the current value.';
 $string['error_secretexpiryrecipients_invalid'] = 'The following secret expiry notification recipients are not valid email addresses: {$a}';
 $string['auth_settings_validation_error'] = 'Invalid authentication settings detected. The following configuration issues must be resolved to ensure successful authentication:';
@@ -362,7 +382,9 @@ $string['errorusermatched'] = 'The Microsoft 365 account "{$a->entraidupn}" is a
 // User mapping options.
 $string['update_oncreate_and_onlogin'] = 'On creation and every login';
 $string['update_oncreate_and_onlogin_and_usersync'] = 'On creation, every login, and every user sync task run';
+$string['update_oncreate_and_usersync'] = 'On creation and every user sync task run';
 $string['update_onlogin_and_usersync'] = 'On every login and every user sync task run';
+$string['upgradeoidcuniqidtoolong'] = 'The upgrade cannot continue: some auth_oidc_token records have an oidcuniqid longer than 200 characters, which the new column length would truncate. Please delete those token records and run the upgrade again.';
 
 // Remote fields.
 $string['settings_fieldmap_feild_not_mapped'] = '(not mapped)';
@@ -386,6 +408,8 @@ $string['settings_fieldmap_field_state'] = 'State';
 $string['settings_fieldmap_field_streetAddress'] = 'Street Address';
 $string['settings_fieldmap_field_userPrincipalName'] = 'User Principal Name';
 $string['settings_fieldmap_field_employeeId'] = 'Employee ID';
+$string['settings_fieldmap_field_employeeType'] = 'Employee type';
+$string['settings_fieldmap_field_accountEnabled'] = 'Account enabled';
 $string['settings_fieldmap_field_businessPhones'] = 'Office phone';
 $string['settings_fieldmap_field_mobilePhone'] = 'Mobile phone';
 $string['settings_fieldmap_field_officeLocation'] = 'Office';
@@ -395,6 +419,7 @@ $string['settings_fieldmap_field_manager_email'] = 'Manager email';
 $string['settings_fieldmap_field_teams'] = 'Teams';
 $string['settings_fieldmap_field_groups'] = 'Groups';
 $string['settings_fieldmap_field_roles'] = 'Roles';
+$string['settings_fieldmap_field_tokenclaim'] = '{$a} (token claim)';
 $string['settings_fieldmap_field_onPremisesSamAccountName'] = 'On-premises SAM account name';
 $string['settings_fieldmap_field_extensionattribute'] = 'Extension attribute {$a}';
 $string['settings_fieldmap_field_sds_school_id'] = 'SDS school ID ({$a})';
@@ -416,7 +441,7 @@ $string['binding_username_claim_description'] = '<p class="warning_header">This 
 <ol>
 <li>Make sure you have a manual site administrator account, i.e. not using OpenID Connect authentication method.</li>
 <li>Schedule enough downtime and put the Moodle site into maintenance mode.</li>
-<li>Backup Moodle database, in particular <span class="code">user</span> and <span class="code">auth_oidc_tokens</span> tables. If local_o365 plugin is installed, backup <span class="code">local_o365_objects</span> table too.</li>
+<li>Backup Moodle database, in particular <span class="auth_oidc_code">user</span> and <span class="auth_oidc_code">auth_oidc_token</span> tables. If local_o365 plugin is installed, backup <span class="auth_oidc_code">local_o365_objects</span> table too.</li>
 <li>Use the <a href="{$a}" target="_blank">update binding username tool</a> to update Moodle username, auth_oidc token, and other connection records of the existing user to match the value of the claim to be changed to.</li>
 <li>Update the binding username token setting on this page.</li>
 <li>Purge caches.</li>
@@ -425,6 +450,7 @@ $string['binding_username_claim_description'] = '<p class="warning_header">This 
 <p>In most cases this setting should be set to the default option "Choose automatically", meaning the plugin will try to determine the token to use depending on IdP type. Misconfiguration or unexpected change of this setting will result in SSO failure.</p>';
 $string['binding_username_claim_description_existing_claims'] = 'The following claims are present in existing user ID tokens. Choose claims not on the list may results in SSO failure.<br/>
 <div class="existing_claims">{$a}</div>';
+$string['binding_username_claim_warning'] = 'This is an advanced feature. In most cases, it should remain set to "Choose automatically"; an incorrect configuration may affect user records and disrupt single sign-on (SSO).';
 $string['binding_username_auto'] = 'Choose automatically';
 $string['binding_username_custom'] = 'Custom';
 $string['bindingusernameclaim'] = 'Binding username claim';
@@ -432,6 +458,18 @@ $string['customclaimname'] = 'Custom claim name';
 $string['customclaimname_description'] = 'This field is used only when the <b>binding username claim</b> setting is set to <b>Custom</b>.';
 $string['binding_username_claim_tool_link_desc'] = 'To update the binding username claim for existing users, use the <a href="{$a}">Change binding username claim tool</a>.';
 $string['cleanup_oidc_tokens_link_desc'] = 'To clean up obsolete OpenID Connect tokens, use the <a href="{$a}">Cleanup OpenID Connect tokens</a> tool.';
+$string['clear_user_tokens_link_desc'] = 'To remove the stored tokens of all users, or of selected users, use the <a href="{$a}">Clear user tokens</a> tool.';
+$string['clear_user_tokens'] = 'Clear user tokens';
+$string['clear_user_tokens_desc'] = 'Removes the OpenID Connect and Microsoft 365 tokens stored for users. Affected users will get new tokens the next time they log in using OpenID Connect, or connect to Microsoft 365. Their links to Microsoft 365 accounts are kept. WARNING: This may interrupt logins in-process, so it\'s best to do this during downtime.';
+$string['clear_user_tokens_scope_selected'] = 'Selected users';
+$string['clear_user_tokens_scope_all'] = 'All users';
+$string['clear_user_tokens_users'] = 'Users';
+$string['clear_user_tokens_submit'] = 'Clear tokens';
+$string['clear_user_tokens_no_name'] = '(no name)';
+$string['clear_user_tokens_no_user_selected'] = 'Select at least one user.';
+$string['clear_user_tokens_confirm_all'] = 'Are you sure you want to clear the tokens of all users? {$a} user(s) currently have tokens.';
+$string['clear_user_tokens_confirm_selected'] = 'Are you sure you want to clear the tokens of the selected users? {$a} of the selected user(s) currently have tokens.';
+$string['clear_user_tokens_success'] = 'Cleared {$a} token record(s).';
 $string['binding_username_claim_help_ms_no_user_sync'] = 'The options for non Microsoft IdPs include:
 <ul>
 <li><b>Choose automatically</b>: Uses current logic, determining the token by IdP type and falling back to <b>sub</b> if no claim is found.</li>
@@ -485,8 +523,7 @@ $string['update_success_o365'] = 'Microsoft 365 connection record updated succes
 $string['update_error_nothing_updated'] = 'Nothing was updated.';
 $string['error_invalid_upload_file'] = 'Invalid upload file.';
 $string['csvline'] = 'CSV line';
-$string['change_binding_username_claim_tool'] = 'Change binding username claim tool';
-$string['change_binding_username_claim_tool_description'] = '<p class="warning_header">This is an advanced feature!</p>
+$string['change_binding_username_claim_tool_description'] = '<p class="warning_header">This is an advanced feature. Incorrect use may affect user records and disrupt single sign-on (SSO).</p>
 <p>This tool allows site administrators to bulk update the following records:</p>
 <ul>
 <li>Moodle account usernames,</li>
@@ -494,27 +531,26 @@ $string['change_binding_username_claim_tool_description'] = '<p class="warning_h
 <li>Moodle and Microsoft account connection records.</li>
 </ul>
 <p>This should only be used when changing the <b>Binding username claim</b> settings.</p>
-<p class="warning">Be very cautious when using this feature, and follow the steps on the <a href="{$a}" target="_blank">Binding username claim configuration page</a>. Misuse of this tool will result in Moodle user records being damaged and/or SSO failure.</p>
 <p>The tool accepts a simple CSV file with two columns:</p>
 <ul>
-<li><b><span class="code">username</span></b>: The current username of the Moodle account to be updated, or if the current user is manually matched, this needs to be the current binding claim value.</li>
-<li><b><span class="code">new_username</span></b>: The case-sensitive value of the new token claim to be used as the binding username claim. If the user is automatically matched and uses the OpenID Connect authentication type, the lowercase of this value will be used as Moodle username.</li>
+<li><b><span class="auth_oidc_code">username</span></b>: The current username of the Moodle account to be updated, or if the current user is manually matched, this needs to be the current binding claim value.</li>
+<li><b><span class="auth_oidc_code">new_username</span></b>: The case-sensitive value of the new token claim to be used as the binding username claim. If the user is automatically matched and uses the OpenID Connect authentication type, the lowercase of this value will be used as Moodle username.</li>
 </ul>
 <p>When the file is uploaded, the tool will perform the following actions:</p>
 <ol>
-<li>Find an existing Moodle user with the given <span class="code">username</span> as either username or email address, and using the OpenID Connect authentication method, and if one is found, update the username of the user to be the lowercase of <span class="code">new_username</span>.</li>
+<li>Find an existing Moodle user with the given <span class="auth_oidc_code">username</span> as either username or email address, and using the OpenID Connect authentication method, and if one is found, update the username of the user to be the lowercase of <span class="auth_oidc_code">new_username</span>.</li>
 <li>Update OpenID Connect token record.
 <ul>
-<li>If a user is found in the step 1 above, then find the token record in the <span class="code">auth_oidc_token</span> table for the user, and update <span class="code">username</span> column to be the lowercase of <span class="code">new_username</span>, and <span class="code">oidcusername</span> column to be the same as <span class="code">new_username</span>.</li>
-<li>If no record is found above, it will try to find record in the <span class="code">auth_oidc_token</span> with <span class="code">oidcusername</span> column matching the old <span class="code">username</span>, and update it to be <span class="code">newusername</span>.</li>
+<li>If a user is found in the step 1 above, then find the token record in the <span class="auth_oidc_code">auth_oidc_token</span> table for the user, and update <span class="auth_oidc_code">username</span> column to be the lowercase of <span class="auth_oidc_code">new_username</span>, and <span class="auth_oidc_code">oidcusername</span> column to be the same as <span class="auth_oidc_code">new_username</span>.</li>
+<li>If no record is found above, it will try to find record in the <span class="auth_oidc_code">auth_oidc_token</span> with <span class="auth_oidc_code">oidcusername</span> column matching the old <span class="auth_oidc_code">username</span>, and update it to be <span class="auth_oidc_code">new_username</span>.</li>
 </ul>
-<li>Providing the <span class="code">local_365</span> plugin is installed, update user connection record.
+<li>Providing the <span class="auth_oidc_code">local_o365</span> plugin is installed, update user connection record.
 <ul>
-<li>If a user is found in stpe 1 above, then find the connection record of the user in the <span class="code">local_o365_objects</span> table, and update the <span class="code">o365name</span> column to be the same as <span class="code">new_username</span>.</li>
-<li>If no user is found in step 1, then it will try to find a record for a user in <span class="code">local_o365_objects</span> table with <span class="code">o365name</span> matching the <span class="code">username</span> value, and update it to be <span class="code">newusername</span> value.</li>
+<li>If a user is found in step 1 above, then find the connection record of the user in the <span class="auth_oidc_code">local_o365_objects</span> table, and update the <span class="auth_oidc_code">o365name</span> column to be the same as <span class="auth_oidc_code">new_username</span>.</li>
+<li>If no user is found in step 1, then it will try to find a record for a user in <span class="auth_oidc_code">local_o365_objects</span> table with <span class="auth_oidc_code">o365name</span> matching the <span class="auth_oidc_code">username</span> value, and update it to be <span class="auth_oidc_code">new_username</span> value.</li>
 </ul>
 </ol>
-<p>The example file below would change the binding username claim from <span class="code">upn</span> or <span class="code">email</span> to <span class="code">oid</span>.</p>';
+<p>The example file below would change the binding username claim from <span class="auth_oidc_code">upn</span> or <span class="auth_oidc_code">email</span> to <span class="auth_oidc_code">oid</span>.</p>';
 $string['change_binding_username_claim_tool_result'] = 'Update results';
 $string['update_username_results'] = 'Update username results';
 $string['new_username'] = 'New username';
